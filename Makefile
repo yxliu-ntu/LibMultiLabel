@@ -2,6 +2,7 @@ SHELL := /bin/bash
 all: init activate
 
 init:
+	. ./init.sh
 	virtualenv -p /usr/bin/python3 venv
 	chmod +x venv/bin/activate
 activate:
