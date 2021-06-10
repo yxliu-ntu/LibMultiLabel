@@ -144,3 +144,27 @@ python3 main.py --eval --config CONFIG_PATH --load_checkpoint CHECKPOINT_PATH --
 - Use `--save_k_predictions` to save the top K predictions for each instance in the test set. K=100 if not specified.
 - Use `--predict_out_path` to specify the file for storing the predicted top-K labels/scores.
 
+
+## Hyperparameter Search
+Parameter selection is known to be extremely important in machine learning practice; see a powerful reminder in "[this paper](https://www.csie.ntu.edu.tw/~cjlin/papers/parameter_selection/acl2021_parameter_selection.pdf)". Here we leverage [Ray Tune](https://docs.ray.io/en/master/tune/index.html), which is a python library for hyperparameter tuning, to select parameters. Due to the dependency of Ray Tune, first make sure your python version is not greater than 3.8. Then, install the related packages with:
+```
+pip3 install -Ur requirements_parameter_search.txt
+```
+We provide a program `search_params.py` to demonstrate how to run LibMultiLabel with Ray Tune. An example is as follows.
+```
+python3 search_params.py  --config example_config/rcv1/cnn_tune.yml
+                          --search_alg basic_variant
+```
+
+- **config**: configure *all* parameters in a yaml file. You can define a continuous, a discrete, or other types of search space (see a list [here](https://docs.ray.io/en/master/tune/api_docs/search_space.html#tune-sample-docs)). An example of configuring the parameters is presented as follows:
+```yaml
+dropout: ['grid_search', [0.2, 0.4, 0.6, 0.8]] # grid search
+num_filter_per_size: ['choice', [350, 450, 550]] # discrete
+learning_rate: ['uniform', 0.2, 0.8] # continuous
+activation: tanh # not for hyperparameter search
+```
+- **search_alg**: specify a search algorithm considered in [Ray Tune](https://docs.ray.io/en/master/tune/api_docs/suggestion.html). We support basic_variant (e.g., grid/random), bayesopt, and optuna. You can also define `search_alg` in the config file. For example, if you want to run grid search over `learning_rate`, the config is like this:
+```yaml
+search_alg: basic_variant
+learning_rate: ['grid_search', [0.2, 0.4, 0.6, 0.8]]
+```

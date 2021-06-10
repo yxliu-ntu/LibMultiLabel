@@ -4,17 +4,12 @@ from datetime import datetime
 from pathlib import Path
 
 import os
-import torch
 import yaml
-import numpy as np
 
 from libmultilabel import data_utils
 from libmultilabel.model import Model
-from libmultilabel.utils import ArgDict, Timer, dump_log, save_top_k_predictions
+from libmultilabel.utils import ArgDict, Timer, set_seed, init_device, dump_log, save_top_k_predictions
 from libmultilabel.evaluate import evaluate
-
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
 
 def get_config():
@@ -42,7 +37,6 @@ def get_config():
     parser.add_argument('--val_size', type=float, default=0.2, help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
     parser.add_argument('--min_vocab_freq', type=int, default=1, help='The minimum frequency needed to include a token in the vocabulary (default: %(default)s)')
     parser.add_argument('--max_seq_length', type=int, default=500, help='The maximum number of tokens of a sample (default: %(default)s)')
-    parser.add_argument('--fixed_length', action='store_true', help='Whether to pad all sequence to MAX_SEQ_LENGTH (default: %(default)s)')
     parser.add_argument('--shuffle', type=bool, default=True, help='Whether to shuffle training data before each epoch (default: %(default)s)')
 
     # train
@@ -63,7 +57,7 @@ def get_config():
     parser.add_argument('--filter_sizes', type=int, nargs='+', default=[4], help='Size of convolutional filters (default: %(default)s)')
     parser.add_argument('--dropout', type=float, default=0.2, help='Optional specification of dropout (default: %(default)s)')
     parser.add_argument('--dropout2', type=float, default=0.2, help='Optional specification of the second dropout (default: %(default)s)')
-    parser.add_argument('--pool_size', type=int, default=2, help='Polling size for dynamic max-pooling (default: %(default)s)')
+    parser.add_argument('--num_pool', type=int, default=1, help='Number of pool for dynamic max-pooling (default: %(default)s)')
 
     # eval
     parser.add_argument('--eval_batch_size', type=int, default=256, help='Size of evaluating batches (default: %(default)s)')
@@ -82,7 +76,9 @@ def get_config():
 
     # others
     parser.add_argument('--cpu', action='store_true', help='Disable CUDA')
+    parser.add_argument('--silent', action='store_true', help='Enable silent mode')
     parser.add_argument('--data_workers', type=int, default=4, help='Use multi-cpu core for data pre-processing (default: %(default)s)')
+    parser.add_argument('--embed_cache_dir', type=str, help='For parameter search only: path to a directory for storing embeddings for multiple runs. (default: %(default)s)')
     parser.add_argument('--eval', action='store_true', help='Only run evaluation on the test set (default: %(default)s)')
     parser.add_argument('--load_checkpoint', help='The checkpoint to warm-up with (default: %(default)s)')
     parser.add_argument('-h', '--help', action='help')
@@ -93,27 +89,12 @@ def get_config():
     return config
 
 
-def init_env(config):
-    # set a debug environment variable CUBLAS_WORKSPACE_CONFIG to ":16:8" (may limit overall performance) or ":4096:8" (will increase library footprint in GPU memory by approximately 24MiB).
-    # https://docs.nvidia.com/cuda/cublas/index.html
-    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
-    if config.seed is not None:
-        if config.seed >= 0:
-            np.random.seed(config.seed)
-            torch.manual_seed(config.seed)
-            torch.set_deterministic(True)
-            torch.backends.cudnn.benchmark = False
-        else:
-            logging.warning(f'the random seed should be a non-negative integer')
-
-    config.device = None
-    if not config.cpu and torch.cuda.is_available():
-        config.device = torch.device('cuda')
-    else:
-        config.device = torch.device('cpu')
-        # https://github.com/pytorch/pytorch/issues/11201
-        torch.multiprocessing.set_sharing_strategy('file_system')
-    logging.info(f'Using device: {config.device}')
+def main():
+    config = get_config()
+    log_level = logging.WARNING if config.silent else logging.INFO
+    logging.basicConfig(level=log_level, format='%(asctime)s %(levelname)s:%(message)s')
+    set_seed(seed=config.seed)
+    config.device = init_device(use_cpu=config.cpu)
 
     config.run_name = '{}_{}_{}'.format(
         config.data_name,
@@ -122,12 +103,6 @@ def init_env(config):
     )
     logging.info(f'Run name: {config.run_name}')
 
-    return config
-
-
-def main():
-    config = get_config()
-    config = init_env(config)
     datasets = data_utils.load_datasets(config)
 
     if config.eval:
@@ -144,10 +119,11 @@ def main():
 
     if 'test' in datasets:
         test_loader = data_utils.get_dataset_loader(config, datasets['test'], model.word_dict, model.classes, train=False)
-        test_metrics = evaluate(model, test_loader, config.monitor_metrics)
+        test_metrics = evaluate(model, test_loader, config.monitor_metrics, silent=config.silent)
         metric_dict = test_metrics.get_metric_dict(use_cache=False)
         dump_log(config=config, metrics=metric_dict, split='test')
-        print(test_metrics)
+        if not config.silent:
+            print(test_metrics)
         if config.save_k_predictions > 0:
             if not config.predict_out_path:
                 config.predict_out_path = os.path.join(config.result_dir, config.run_name, 'predictions.txt')
