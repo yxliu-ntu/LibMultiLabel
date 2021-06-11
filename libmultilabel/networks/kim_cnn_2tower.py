@@ -23,8 +23,9 @@ class KimCNN2Tower(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        self.Q = embed_vecs.new_empty(size=(config.num_classes, conv_output_size), requires_grad=True)
-        getattr(nn.init, config.init_weight+ '_')(self.Q)
+        self.linear = nn.Linear(conv_output_size, config.num_classes)
+        #self.Q = embed_vecs.new_empty(size=(config.num_classes, conv_output_size), requires_grad=True)
+        #getattr(nn.init, config.init_weight+ '_')(self.Q)
 
     def forward(self, text):
         h = self.embedding(text) # (batch_size, length, embed_dim)
@@ -47,4 +48,7 @@ class KimCNN2Tower(BaseModel):
             h = h_list[0]
         P = self.activation(h) # (batch_size, total_num_filter)
 
-        return P, self.Q
+        Q = self.linear(torch.eye(h.size()[-1], dtype=h.dtype, device=h.device)).T
+        return P, Q
+
+        #return P, self.Q

@@ -44,6 +44,8 @@ class Model(object):
         if ckpt:
             self.network.load_state_dict(ckpt['state_dict'])
             self.optimizer.load_state_dict(ckpt['optimizer'])
+            if 'Q' in ckpt:
+                self.network.Q = ckpt['Q']
         elif config.init_weight is not None:
             init_weight = networks.get_init_weight_func(config)
             self.network.apply(init_weight)
@@ -194,6 +196,7 @@ class Model(object):
             'epoch': epoch,
             'run_name': self.config.run_name,
             'state_dict': self.network.state_dict(),
+            #'Q': self.network.Q,
             'word_dict': self.word_dict,
             'classes': self.classes,
             'optimizer': self.optimizer.state_dict(),
