@@ -23,7 +23,7 @@ class KimCNN(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        self.linear = nn.Linear(conv_output_size, config.num_classes)
+        self.linear = nn.Linear(conv_output_size, config.num_classes, bias=False)
 
     def forward(self, text):
         h = self.embedding(text) # (batch_size, length, embed_dim)
@@ -45,7 +45,9 @@ class KimCNN(BaseModel):
         else:
             h = h_list[0]
         h = self.activation(h) # (batch_size, total_num_filter)
+        print(h.sum())
 
         # linear output
         h = self.linear(h)
+        print(self.linear.weight.data.sum())
         return {'logits': h}
