@@ -24,11 +24,6 @@ class KimCNN2Tower(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        #self.Q = embed_vecs.new_empty(size=(config.num_classes, conv_output_size), requires_grad=True)
-        #getattr(nn.init, config.init_weight+ '_')(self.Q)
-
-        #self.linear = nn.Linear(conv_output_size, config.num_classes, bias=False)
-
         self.Q = nn.Parameter(torch.Tensor(config.num_classes, conv_output_size))
         self.reset_parameters()
 
@@ -55,10 +50,7 @@ class KimCNN2Tower(BaseModel):
         else:
             h = h_list[0]
         P = self.activation(h) # (batch_size, total_num_filter)
-        #print(P.sum())
 
-        Q = self.Q #self.linear(torch.eye(h.size()[-1], dtype=h.dtype, device=h.device)).T
-        #print(Q.sum())#, self.linear.weight.data.sum())
-        return P, Q
+        Q = self.Q
 
-        #return P, self.Q
+        return P, self.Q

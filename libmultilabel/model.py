@@ -47,8 +47,6 @@ class Model(object):
         elif config.init_weight is not None:
             init_weight = networks.get_init_weight_func(config)
             self.network.apply(init_weight)
-            #print(self.network.state_dict())
-            #exit(0)
 
     def init_optimizer(self, optimizer=None):
         """Initialize an optimizer for the free parameters of the network.
@@ -124,10 +122,10 @@ class Model(object):
             loss, batch_label_scores = self.train_step(batch)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
-            if idx < 100:
-                print(idx, loss) #batch['text'])
-            else:
-                exit(0)
+            #if idx < 100:
+            #    print(idx, loss) #batch['text'])
+            #else:
+            #    exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
         logging.info(f'Epoch loss: {train_loss.avg}')
@@ -146,13 +144,12 @@ class Model(object):
         target_labels = inputs['label']
         if '2Tower' in self.config.model_name:
             P, Q = self.network(inputs['text'])
-            outputs = P @ Q.T #.to(self.device)
+            logits = P @ Q.T #.to(self.device)
         else:
             outputs = self.network(inputs['text'])
-        pred_logits = outputs['logits'] if isinstance(outputs, dict) else outputs
-        #print(pred_logits.sum().item(), pred_logits.size())
-        loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels)
-        batch_label_scores = torch.sigmoid(pred_logits)
+            logits = outputs['logits']
+        loss = F.binary_cross_entropy_with_logits(logits, target_labels)
+        batch_label_scores = torch.sigmoid(logits)
 
         # Update parameters
         self.optimizer.zero_grad()

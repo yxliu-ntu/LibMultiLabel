@@ -32,7 +32,7 @@ class KimCNN(BaseModel):
 
         h_list = []
         for conv in self.convs:
-            h_sub = conv(h) # (batch_size, num_filter, length)
+            h_sub = conv(h) # (batch_size, num_filter, length - kernel_size + 1)
             h_sub = F.max_pool1d(h_sub, kernel_size=h_sub.size()[2]) # (batch_size, num_filter, 1)
             h_sub = h_sub.view(h_sub.shape[0], -1) # (batch_size, num_filter)
             h_list.append(h_sub)
@@ -45,9 +45,7 @@ class KimCNN(BaseModel):
         else:
             h = h_list[0]
         h = self.activation(h) # (batch_size, total_num_filter)
-        #print(h.sum())
 
         # linear output
         h = self.linear(h)
-        #print(self.linear.weight.data.sum())
         return {'logits': h}
