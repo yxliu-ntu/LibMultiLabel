@@ -44,11 +44,11 @@ class Model(object):
         if ckpt:
             self.network.load_state_dict(ckpt['state_dict'])
             self.optimizer.load_state_dict(ckpt['optimizer'])
-            if 'Q' in ckpt:
-                self.network.Q = ckpt['Q']
         elif config.init_weight is not None:
             init_weight = networks.get_init_weight_func(config)
             self.network.apply(init_weight)
+            #print(self.network.state_dict())
+            #exit(0)
 
     def init_optimizer(self, optimizer=None):
         """Initialize an optimizer for the free parameters of the network.
@@ -124,8 +124,9 @@ class Model(object):
             loss, batch_label_scores = self.train_step(batch)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
-            print(idx, loss, batch['text'])
-            if idx > 0:
+            if idx < 100:
+                print(idx, loss) #batch['text'])
+            else:
                 exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
@@ -145,11 +146,11 @@ class Model(object):
         target_labels = inputs['label']
         if '2Tower' in self.config.model_name:
             P, Q = self.network(inputs['text'])
-            outputs = P @ Q.T#.to(self.device)
+            outputs = P @ Q.T #.to(self.device)
         else:
             outputs = self.network(inputs['text'])
         pred_logits = outputs['logits'] if isinstance(outputs, dict) else outputs
-        print(pred_logits.sum(), pred_logits.size())
+        #print(pred_logits.sum().item(), pred_logits.size())
         loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels)
         batch_label_scores = torch.sigmoid(pred_logits)
 
@@ -186,7 +187,8 @@ class Model(object):
         with torch.no_grad():
             if '2Tower' in self.config.model_name:
                 P, Q = self.network(inputs['text'])
-                logits = P @ Q.T#.to(self.device)
+                logits = P @ Q.T #.to(self.device)
+                outputs = {'logits': logits}
             else:
                 outputs = self.network(inputs['text'])
                 logits = outputs['logits']
@@ -195,7 +197,7 @@ class Model(object):
         return {
             'scores': batch_label_scores,
             'logits': logits,
-            'outputs': {'logits': logits}, #outputs,
+            'outputs': outputs,
         }
 
     def save(self, epoch, is_best=False):
@@ -204,7 +206,6 @@ class Model(object):
             'epoch': epoch,
             'run_name': self.config.run_name,
             'state_dict': self.network.state_dict(),
-            #'Q': self.network.Q,
             'word_dict': self.word_dict,
             'classes': self.classes,
             'optimizer': self.optimizer.state_dict(),

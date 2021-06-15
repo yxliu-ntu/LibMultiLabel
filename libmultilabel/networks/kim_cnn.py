@@ -45,9 +45,9 @@ class KimCNN(BaseModel):
         else:
             h = h_list[0]
         h = self.activation(h) # (batch_size, total_num_filter)
-        print(h.sum())
+        #print(h.sum())
 
         # linear output
         h = self.linear(h)
-        print(self.linear.weight.data.sum())
+        #print(self.linear.weight.data.sum())
         return {'logits': h}

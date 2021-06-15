@@ -6,7 +6,7 @@ max_seq_length: 500
 
 # train
 seed: 1337
-epochs: 50
+epochs: 1 #50
 batch_size: 64
 optimizer: adam
 learning_rate: 0.0005099137446356937
