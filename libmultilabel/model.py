@@ -138,7 +138,9 @@ class Model(object):
 
         # Run forward
         target_labels = inputs['label']
-        outputs = self.network(inputs['text'])
+        #outputs = self.network(inputs['text'])
+        P, Q = self.network(inputs['text'])
+        outputs = P @ Q.T.to(self.device)
         pred_logits = outputs['logits'] if isinstance(outputs, dict) else outputs
         loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels)
         batch_label_scores = torch.sigmoid(pred_logits)
@@ -174,14 +176,16 @@ class Model(object):
 
         # Run forward
         with torch.no_grad():
-            outputs = self.network(inputs['text'])
-            logits = outputs['logits']
+            #outputs = self.network(inputs['text'])
+            #logits = outputs['logits']
+            P, Q = self.network(inputs['text'])
+            logits = P @ Q.T.to(self.device)
             batch_label_scores = torch.sigmoid(logits)
 
         return {
             'scores': batch_label_scores,
             'logits': logits,
-            'outputs': outputs,
+            'outputs': {'logits': logits}, #outputs,
         }
 
     def save(self, epoch, is_best=False):
