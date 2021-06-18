@@ -58,6 +58,9 @@ def get_config():
     parser.add_argument('--dropout', type=float, default=0.2, help='Optional specification of dropout (default: %(default)s)')
     parser.add_argument('--dropout2', type=float, default=0.2, help='Optional specification of the second dropout (default: %(default)s)')
     parser.add_argument('--num_pool', type=int, default=1, help='Number of pool for dynamic max-pooling (default: %(default)s)')
+    parser.add_argument('--loss', type=str, choices=['Minibatch-LRSQ', 'Sogram-LRSQ', 'Naive-LRSQ', 'Naive-LRLR', 'Ori-LRLR'], default='Ori-LRLR', help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
+    parser.add_argument('--omega', type=float, default=1.0, help='Cost weight for the negative part of the loss function')
+    parser.add_argument('--imp_r', type=float, default=0.0, help='Imputed value for the negative part of the loss function')
 
     # eval
     parser.add_argument('--eval_batch_size', type=int, default=256, help='Size of evaluating batches (default: %(default)s)')

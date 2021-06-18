@@ -1,0 +1,3 @@
+[submodule "2TowerMNLoss"]
+	path = 2TowerMNLoss
+	url = git@github.com:yxliu-ntu/2TowerMNLoss.git

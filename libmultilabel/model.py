@@ -6,9 +6,11 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
+import numpy as np
 
 from . import data_utils
 from . import networks
+from . import MNLoss
 from .evaluate import evaluate
 from .utils import AverageMeter, Timer, dump_log
 
@@ -117,22 +119,37 @@ class Model(object):
         train_loss = AverageMeter()
         epoch_time = Timer()
         progress_bar = tqdm(data_loader, disable=self.config.silent)
+        if self.config.loss == 'Naive-LRLR':
+            mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega, loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
+        elif self.config.loss == 'Naive-LRSQ':
+            mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
+        elif self.config.loss == 'Minibatch-LRSQ':
+            mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
+        elif self.config.loss == 'Sogram-LRSQ':
+            raise NotImplementedError
+        else:
+            mnloss = None
 
         for idx, batch in enumerate(progress_bar):
-            loss, batch_label_scores = self.train_step(batch)
+            #loss, batch_label_scores = self.train_step(batch, mnloss)
+            loss = self.train_step(batch, mnloss)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
-            #if idx < 100:
-            #    print(idx, loss) #batch['text'])
-            #else:
-            #    exit(0)
+            if idx < 100:
+                print(idx, loss) #batch['text'])
+            else:
+                exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
         logging.info(f'Epoch loss: {train_loss.avg}')
 
-    def train_step(self, inputs):
+    def train_step(self, inputs, mnloss=None):
         """Forward a batch of examples; stop the optimizer to update weights.
         """
+        def _dense_to_sparse(dense):
+            indices = torch.nonzero(dense).t()
+            values = dense[indices[0], indices[1]] # modify this based on dimensionality
+            return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
         # Train mode
         self.network.train()
 
@@ -144,19 +161,28 @@ class Model(object):
         target_labels = inputs['label']
         if '2Tower' in self.config.model_name:
             P, Q = self.network(inputs['text'])
-            logits = P @ Q.T #.to(self.device)
+            if mnloss is None:
+                logits = P @ Q.T #.to(self.device)
+                loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
+            else:
+                Y = _dense_to_sparse(target_labels)
+                A = P.new_ones(P.size()[0])
+                B = Q.new_ones(Q.size()[0])
+                Pt = P.new_ones(P.size()) * np.sqrt(self.config.imp_r)
+                Qt = Q.new_ones(Q.size()) * np.sqrt(self.config.imp_r)
+                loss = mnloss(Y, A, B, P, Q, Pt, Qt)
         else:
             outputs = self.network(inputs['text'])
             logits = outputs['logits']
-        loss = F.binary_cross_entropy_with_logits(logits, target_labels)
-        batch_label_scores = torch.sigmoid(logits)
+            loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
+        #batch_label_scores = torch.sigmoid(logits.detach())
 
         # Update parameters
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        return loss.item(), batch_label_scores
+        return loss.item()#, batch_label_scores
 
     def predict(self, inputs):
         """Forward a batch of examples only to get predictions.
