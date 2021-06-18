@@ -23,7 +23,7 @@ class KimCNN(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        self.linear = nn.Linear(conv_output_size, config.num_classes)
+        self.linear = nn.Linear(conv_output_size, config.num_classes, bias=False)
 
     def forward(self, text):
         h = self.embedding(text) # (batch_size, length, embed_dim)
@@ -32,7 +32,7 @@ class KimCNN(BaseModel):
 
         h_list = []
         for conv in self.convs:
-            h_sub = conv(h) # (batch_size, num_filter, length)
+            h_sub = conv(h) # (batch_size, num_filter, length - kernel_size + 1)
             h_sub = F.max_pool1d(h_sub, kernel_size=h_sub.size()[2]) # (batch_size, num_filter, 1)
             h_sub = h_sub.view(h_sub.shape[0], -1) # (batch_size, num_filter)
             h_list.append(h_sub)

@@ -122,6 +122,10 @@ class Model(object):
             loss, batch_label_scores = self.train_step(batch)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
+            #if idx < 100:
+            #    print(idx, loss) #batch['text'])
+            #else:
+            #    exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
         logging.info(f'Epoch loss: {train_loss.avg}')
@@ -138,12 +142,14 @@ class Model(object):
 
         # Run forward
         target_labels = inputs['label']
-        #outputs = self.network(inputs['text'])
-        P, Q = self.network(inputs['text'])
-        outputs = P @ Q.T.to(self.device)
-        pred_logits = outputs['logits'] if isinstance(outputs, dict) else outputs
-        loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels)
-        batch_label_scores = torch.sigmoid(pred_logits)
+        if '2Tower' in self.config.model_name:
+            P, Q = self.network(inputs['text'])
+            logits = P @ Q.T #.to(self.device)
+        else:
+            outputs = self.network(inputs['text'])
+            logits = outputs['logits']
+        loss = F.binary_cross_entropy_with_logits(logits, target_labels)
+        batch_label_scores = torch.sigmoid(logits)
 
         # Update parameters
         self.optimizer.zero_grad()
@@ -176,16 +182,19 @@ class Model(object):
 
         # Run forward
         with torch.no_grad():
-            #outputs = self.network(inputs['text'])
-            #logits = outputs['logits']
-            P, Q = self.network(inputs['text'])
-            logits = P @ Q.T.to(self.device)
+            if '2Tower' in self.config.model_name:
+                P, Q = self.network(inputs['text'])
+                logits = P @ Q.T #.to(self.device)
+                outputs = {'logits': logits}
+            else:
+                outputs = self.network(inputs['text'])
+                logits = outputs['logits']
             batch_label_scores = torch.sigmoid(logits)
 
         return {
             'scores': batch_label_scores,
             'logits': logits,
-            'outputs': {'logits': logits}, #outputs,
+            'outputs': outputs,
         }
 
     def save(self, epoch, is_best=False):

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 from ..networks.base import BaseModel
 
@@ -23,8 +24,11 @@ class KimCNN2Tower(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        self.Q = embed_vecs.new_empty(size=(config.num_classes, conv_output_size), requires_grad=True)
-        getattr(nn.init, config.init_weight+ '_')(self.Q)
+        self.Q = nn.Parameter(torch.Tensor(config.num_classes, conv_output_size))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.kaiming_uniform_(self.Q, a=math.sqrt(5))
 
     def forward(self, text):
         h = self.embedding(text) # (batch_size, length, embed_dim)
@@ -46,5 +50,7 @@ class KimCNN2Tower(BaseModel):
         else:
             h = h_list[0]
         P = self.activation(h) # (batch_size, total_num_filter)
+
+        Q = self.Q
 
         return P, self.Q
