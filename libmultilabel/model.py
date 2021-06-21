@@ -134,10 +134,10 @@ class Model(object):
             loss = self.train_step(batch, mnloss)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
-            if idx < 100:
-                print(idx, loss) #batch['text'])
-            else:
-                exit(0)
+            #if idx < 100:
+            #    print(idx, loss) #batch['text'])
+            #else:
+            #    exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
         logging.info(f'Epoch loss: {train_loss.avg}')
@@ -167,8 +167,8 @@ class Model(object):
                 Y = _dense_to_sparse(target_labels)
                 A = P.new_ones(P.size()[0])
                 B = Q.new_ones(Q.size()[0])
-                Pt = P.new_ones(P.size()) * np.sqrt(self.config.imp_r)
-                Qt = Q.new_ones(Q.size()) * np.sqrt(self.config.imp_r)
+                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
                 loss = mnloss(Y, A, B, P, Q, Pt, Qt)
         else:
             outputs = self.network(inputs['text'])

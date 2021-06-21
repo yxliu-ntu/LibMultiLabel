@@ -1,0 +1,62 @@
+# data
+data_dir: data/rcv1
+data_name: rcv1
+min_vocab_freq: 1
+max_seq_length: 500
+
+# train
+seed: 1337
+epochs: 50
+batch_size: 64
+optimizer: adam
+learning_rate: ['uniform', 0.0003, 0.001]
+weight_decay: 0
+patience: 5
+shuffle: true
+
+# eval
+eval_batch_size: 256
+monitor_metrics: [P@1, P@3, P@5]
+val_metric: P@1
+
+# model
+model_name: KimCNN2Tower
+num_filter_per_size: 128 # filter channels
+filter_sizes: [2, 4, 8]
+dropout: 0.2 #['choice', [0.2, 0.4, 0.6, 0.8]]
+init_weight: kaiming_uniform
+activation: relu
+#loss: Naive-LRLR #['grid_search', [Naive-LRLR, Naive-LRSQ]]
+loss: Naive-LRSQ
+omega: ['grid_search', [0.125, 0.25, 0.5, 1.0, 2.0]]
+#omega: ['grid_search', [0.00195312, 0.0078125, 0.03125, 0.125, 0.5, 2.0]]
+imp_r: ['grid_search', [-1, 0, 1]]
+k1: 4
+
+# pretrained vocab / embeddings
+embed_file: glove.6B.300d
+vocab_file: null
+
+# hyperparamter search
+search_alg: basic_variant
+embed_cache_dir: .vector_cache
+
+# other parameters specified in main.py::get_args
+config: example_config/rcv1/cnn_tune_2tower.yml
+cpu: false
+data_workers: 4
+display_iter: 100
+eval: false
+fixed_length: false
+label_file: null
+load_checkpoint: null
+metrics_thresholds: [0.5]
+momentum: 0.9
+predict_out_path: null
+result_dir: runs
+silent: true
+test_path: data/rcv1/test.txt
+train_path: data/rcv1/train.txt
+val_path: null
+val_size: 0.2
+vocab_label_map: null
