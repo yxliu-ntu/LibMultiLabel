@@ -126,7 +126,8 @@ class Model(object):
         elif self.config.loss == 'Minibatch-LRSQ':
             mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
         elif self.config.loss == 'Sogram-LRSQ':
-            raise NotImplementedError
+            mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes), self.config.k1, \
+                    torch.float, self.device, alpha=self.config.alpha, omega=self.config.omega)
         else:
             mnloss = None
 
@@ -154,16 +155,30 @@ class Model(object):
 
         for key in inputs:
             if isinstance(inputs[key], torch.Tensor):
+                #print(key, inputs[key].shape)
                 inputs[key] = inputs[key].to(self.device, non_blocking=True)
+        #exit(0)
 
         # Run forward
-        target_labels = inputs['label']
         if '2Tower' in self.config.model_name:
-            P, Q = self.network(inputs['text'])
             if mnloss is None:
+                target_labels = inputs['label']
+                P, Q = self.network(inputs['text'])
                 logits = P @ Q.T
                 loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
+            elif isinstance(mnloss, MNLoss.SogramMNLoss):
+                ps, qs = self.network(inputs['text'], inputs['label_data'])
+                ys = ps.new_ones(ps.size()[0]) # LTD, this should be read from data
+                pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+                _as = inputs['_as']
+                _bs = inputs['_bs']
+                _abs = inputs['_abs']
+                _bbs = inputs['_bbs']
+                loss = mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
             else:
+                target_labels = inputs['label']
+                P, Q = self.network(inputs['text'])
                 Y = _dense_to_sparse(target_labels)
                 A = P.new_ones(P.size()[0])
                 B = Q.new_ones(Q.size()[0])
@@ -171,6 +186,7 @@ class Model(object):
                 Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
                 loss = mnloss(Y, A, B, P, Q, Pt, Qt)
         else:
+            target_labels = inputs['label']
             outputs = self.network(inputs['text'])
             logits = outputs['logits']
             loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')

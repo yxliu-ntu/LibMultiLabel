@@ -4,6 +4,7 @@ import os
 
 import torch
 import numpy as np
+from scipy.sparse import coo_matrix, vstack
 import pandas as pd
 from nltk.tokenize import RegexpTokenizer
 from sklearn.model_selection import train_test_split
@@ -15,6 +16,75 @@ from tqdm import tqdm
 
 UNK = Vocab.UNK
 PAD = '**PAD**'
+
+
+class TwoTowerTextDataset(Dataset):
+    """Class for text dataset for 2-tower structure"""
+
+    def __init__(self, data, word_dict, classes, max_seq_length, load_by_nnz=False, label_data=None):
+        self.data = data
+        self.word_dict = word_dict
+        self.classes = classes
+        self.max_seq_length = max_seq_length
+        self.label_binarizer = MultiLabelBinarizer().fit([classes])
+        self.M = len(self.data)
+        self.N = len(self.classes)
+
+        self.label_data = label_data
+        self.load_by_nnz = load_by_nnz
+        if self.load_by_nnz:
+            self.__build_mn_matrix__()
+            self.__init_AB__()
+            self.coos = self.mn_matrix.nonzero()
+
+    def __build_mn_matrix__(self):
+        binary_label_matrix = [coo_matrix(self.label_binarizer.transform([d['label']])[0]) for d in self.data]
+        self.mn_matrix = vstack(binary_label_matrix)
+
+    def __init_AB__(self, A=None, B=None):
+        if A is None and B is None:
+            self.A = np.ones(self.M)
+            self.B = np.ones(self.N)
+        else:
+            assert A.shape == (self.M,) and B.shape == (self.N,)
+            self.A = A
+            self.B = B
+        ## LTD: random split train and val can not meet the assumption of Sogram
+        #assert (row_nnz > 0).all() and (col_nnz > 0).all(), "row_flag:{} col_flag:{}".format((row_nnz > 0).all(), (col_nnz > 0).all())
+        col_nnz = self.mn_matrix.sum(axis=0)
+        row_nnz = self.mn_matrix.sum(axis=1)
+        self.Ab = self.A / row_nnz.sum() #row_nnz.A1
+        self.Bb = self.B / col_nnz.sum() #col_nnz.A1
+
+    def __len__(self):
+        if not self.load_by_nnz:
+            return len(self.data)
+        else:
+            return len(self.coos[0])
+
+    def __getitem__(self, index):
+        if not self.load_by_nnz:
+            data = self.data[index]
+            return {
+                'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),  # the word_dict transformation and seq-clipping should be in _load_raw_data() for generalization
+                'label': torch.FloatTensor(self.label_binarizer.transform([data['label']])[0]),
+                'index': data.get('index', 0)
+            }
+        else:
+            coos_x = self.coos[0][index]
+            coos_y = self.coos[1][index]
+            data = self.data[coos_x]
+            return {
+                'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),  # the word_dict transformation and seq-clipping should be in _load_raw_data() for generalization
+                'label_data': torch.LongTensor([coos_y]) if self.label_data is None else torch.FloatTensor(self.label_data[coos_y]),
+                '_as': self.A[coos_x],
+                '_bs': self.B[coos_y],
+                '_abs': self.Ab[coos_x],
+                '_bbs': self.Bb[coos_y],
+                #'coos_x': coos_x,
+                #'coos_y': coos_y,
+                'index': data.get('index', 0)
+            }
 
 
 class TextDataset(Dataset):
@@ -40,6 +110,20 @@ class TextDataset(Dataset):
         }
 
 
+def generate_batch_2tower(data_batch):
+    text_list = [data['text'] for data in data_batch]
+    label_data_list = [data['label_data'] for data in data_batch]
+    return {
+        'index': [data['index'] for data in data_batch],
+        '_as':  torch.FloatTensor([data['_as'] for data in data_batch]),
+        '_bs':  torch.FloatTensor([data['_bs'] for data in data_batch]),
+        '_abs': torch.FloatTensor([data['_abs'] for data in data_batch]),
+        '_bbs': torch.FloatTensor([data['_bbs'] for data in data_batch]),
+        'text': pad_sequence(text_list, batch_first=True),
+        'label_data': pad_sequence(label_data_list, batch_first=True),
+    }
+
+
 def generate_batch(data_batch):
     text_list = [data['text'] for data in data_batch]
     label_list = [data['label'] for data in data_batch]
@@ -51,14 +135,17 @@ def generate_batch(data_batch):
 
 
 def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=True):
-    dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
+    if train:
+        dataset = TwoTowerTextDataset(data, word_dict, classes, config.max_seq_length, load_by_nnz=True)
+    else:
+        dataset = TwoTowerTextDataset(data, word_dict, classes, config.max_seq_length)
 
     dataset_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=config.batch_size if train else config.eval_batch_size,
         shuffle=shuffle,
         num_workers=config.data_workers,
-        collate_fn=generate_batch,
+        collate_fn=generate_batch_2tower if train else generate_batch,
         pin_memory='cuda' in config.device.type,
     )
     return dataset_loader

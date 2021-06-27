@@ -3,6 +3,7 @@ import torch.nn as nn
 from .caml import CAML
 from .kim_cnn import KimCNN
 from .kim_cnn_2tower import KimCNN2Tower
+from .kim_cnn_2tower_real import KimCNN2TowerReal
 from .xml_cnn import XMLCNN
 
 
