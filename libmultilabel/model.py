@@ -135,10 +135,10 @@ class Model(object):
             loss = self.train_step(batch, mnloss)
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
-            #if idx < 100:
-            #    print(idx, loss) #batch['text'])
-            #else:
-            #    exit(0)
+            if idx < 100:
+                print(idx, loss) #batch['text'])
+            else:
+                exit(0)
 
         logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
         logging.info(f'Epoch loss: {train_loss.avg}')
@@ -155,9 +155,7 @@ class Model(object):
 
         for key in inputs:
             if isinstance(inputs[key], torch.Tensor):
-                #print(key, inputs[key].shape)
                 inputs[key] = inputs[key].to(self.device, non_blocking=True)
-        #exit(0)
 
         # Run forward
         if '2Tower' in self.config.model_name:
@@ -167,8 +165,9 @@ class Model(object):
                 logits = P @ Q.T
                 loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
             elif isinstance(mnloss, MNLoss.SogramMNLoss):
-                ps, qs = self.network(inputs['text'], inputs['label_data'])
-                ys = ps.new_ones(ps.size()[0]) # LTD, this should be read from data
+                ps, qs = self.network(inputs['us'], inputs['vs'])
+                #ys = ps.new_ones(ps.size()[0]) # LTD, this should be read from data
+                ys = inputs['ys'] # LTD, this should be read from data
                 pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
                 qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
                 _as = inputs['_as']
@@ -177,11 +176,11 @@ class Model(object):
                 _bbs = inputs['_bbs']
                 loss = mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
             else:
-                target_labels = inputs['label']
-                P, Q = self.network(inputs['text'])
-                Y = _dense_to_sparse(target_labels)
-                A = P.new_ones(P.size()[0])
-                B = Q.new_ones(Q.size()[0])
+                P, Q = self.network(inputs['U'], inputs['V'])
+                Y = inputs['Y']
+                #Y = _dense_to_sparse(target_labels)
+                A = inputs['A']
+                B = inputs['B']
                 Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
                 Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
                 loss = mnloss(Y, A, B, P, Q, Pt, Qt)

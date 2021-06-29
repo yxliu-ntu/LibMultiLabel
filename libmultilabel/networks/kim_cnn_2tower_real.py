@@ -10,6 +10,7 @@ class KimCNN2TowerReal(BaseModel):
     def __init__(self, config, embed_vecs):
         super(KimCNN2TowerReal, self).__init__(config, embed_vecs)
 
+        # P tower
         self.filter_sizes = config.filter_sizes
         emb_dim = embed_vecs.shape[1]
         num_filter_per_size = config.num_filter_per_size
@@ -24,6 +25,7 @@ class KimCNN2TowerReal(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
+        # Q tower
         #self.Q = nn.Parameter(torch.Tensor(config.num_classes, conv_output_size))
         self.Q_embedding = nn.Embedding(config.num_classes, conv_output_size)
         self.reset_parameters()
