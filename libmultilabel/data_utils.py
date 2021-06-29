@@ -20,180 +20,6 @@ UNK = Vocab.UNK
 PAD = '**PAD**'
 
 
-def _build_mn_matrix(data, classes):
-    label_binarizer = MultiLabelBinarizer().fit([classes])
-    binary_label_matrix = [coo_matrix(label_binarizer.transform([d['label']])[0]) for d in data]
-    return sp_vstack(binary_label_matrix)
-
-class TwoTowerDataset(Dataset):
-    """Class for text dataset for 2-tower structure"""
-
-    def __init__(self, U, V, Yu, Yv=None, A=None, B=None):
-        '''
-        U, V: the two feature matrices for the two corresponding tower
-        Yu: the relationship sparse matrix (from U to V)
-        Yv: the relationship sparse matrix (from V to U), can be None if Yu exists
-        A, B: the weight matrices for U and V
-        '''
-        self.U = U
-        self.V = V
-        self.Yu = csr_matrix(Yu)
-        self.Yv = csr_matrix(Yv) if Yv is not None else self.Yu.transpose() # remove transpose, add assertion
-        self.M, self.N = self.Yu.shape
-        self.A = np.ones(self.M) if A is None else A
-        self.B = np.ones(self.N) if B is None else B
-        self.coos = self.Yu.nonzero() ## LTD, check if coos is a pointer
-        self.nnz = len(self.coos[0])
-        ## LTD, it's very likely that col_nnz have zero values.
-        #assert (row_nnz > 0).all() and (col_nnz > 0).all(), "row_flag:{} col_flag:{}".format((row_nnz > 0).all(), (col_nnz > 0).all())
-        col_nnz = self.Yu.sum(axis=0)
-        row_nnz = self.Yu.sum(axis=1)
-        self.Ab = self.A / row_nnz.sum() #row_nnz.A1
-        self.Bb = self.B / col_nnz.sum() #col_nnz.A1
-
-    def __len__(self):
-        raise NotImplementedError
-
-    def __getitem__(self, index):
-        raise NotImplementedError
-
-class NonzeroTextDataset(TwoTowerDataset):
-    """Class for text dataset for 2-tower structure"""
-
-    def __init__(self, data, word_dict, classes, max_seq_length):
-        U = np.array([[word_dict[word] for word in d['text'][:max_seq_length]] for d in data], dtype=object)
-        V = np.arange(len(classes)).reshape(-1, 1)
-        Yu = _build_mn_matrix(data, classes)
-        super(NonzeroTextDataset, self).__init__(U, V, Yu)
-
-    def __len__(self):
-        return self.nnz
-
-    def __getitem__(self, index: int):
-        coos_x = self.coos[0][index]
-        coos_y = self.coos[1][index]
-        return {
-                'u': self.U[coos_x],  # need to customize
-                'v': self.V[coos_y],
-                '_a': self.A[coos_x],
-                '_b': self.B[coos_y],
-                '_ab': self.Ab[coos_x],
-                '_bb': self.Bb[coos_y],
-                'y': self.Yu[coos_x, coos_y],
-                }
-
-class CrossTextDataset(TwoTowerDataset):
-    """Class for text dataset for 2-tower structure"""
-
-    def __init__(self, data, word_dict, classes, max_seq_length):
-        U = np.array([[word_dict[word] for word in d['text'][:max_seq_length]] for d in data], dtype=object)
-        V = np.arange(len(classes)).reshape(-1, 1)
-        Yu = _build_mn_matrix(data, classes)
-        super(CrossTextDataset, self).__init__(U, V, Yu)
-
-    #def __len__(self) -> tuple:
-    #    return (self.M, self.N)
-
-    def __getitem__(self, index: tuple):
-        coos_x, coos_y = index
-        return {
-                'us': self.U[coos_x],
-                'vs': self.V[coos_y],
-                '_as': self.A[coos_x],
-                '_bs': self.B[coos_y],
-                '_abs': self.Ab[coos_x],
-                '_bbs': self.Bb[coos_y],
-                'ys': self.Yu[coos_x, :][:, coos_y],
-                }
-
-class TextDataset(TwoTowerDataset):
-    """Class for text dataset for 2-tower structure"""
-
-    def __init__(self, data, word_dict, classes, max_seq_length):
-        U = np.array([[word_dict[word] for word in d['text'][:max_seq_length]] for d in data], dtype=object)
-        V = np.arange(len(classes)).reshape(-1, 1)
-        Yu = _build_mn_matrix(data, classes)
-        super(TextDataset, self).__init__(U, V, Yu)
-
-    def __len__(self):
-        return self.M
-
-    def __getitem__(self, index: int):
-        return {
-                'text': torch.LongTensor(self.U[index]),
-                'label': torch.FloatTensor(self.Yu[index].todense().A1),
-                'index': 0
-                }
-
-'''
-class TwoTowerTextDataset(Dataset):
-    """Class for text dataset for 2-tower structure"""
-
-    def __init__(self, data, word_dict, classes, max_seq_length, load_by_nnz=False, label_data=None):
-        self.data = data
-        self.word_dict = word_dict
-        self.classes = classes
-        self.max_seq_length = max_seq_length
-        self.label_binarizer = MultiLabelBinarizer().fit([classes])
-        self.M = len(self.data)
-        self.N = len(self.classes)
-
-        self.label_data = label_data
-        self.load_by_nnz = load_by_nnz
-        if self.load_by_nnz:
-            self.__build_mn_matrix__()
-            self.__init_AB__()
-            self.coos = self.mn_matrix.nonzero()
-
-    def __build_mn_matrix__(self):
-        binary_label_matrix = [coo_matrix(self.label_binarizer.transform([d['label']])[0]) for d in self.data]
-        self.mn_matrix = vstack(binary_label_matrix)
-
-    def __init_AB__(self, A=None, B=None):
-        if A is None and B is None:
-            self.A = np.ones(self.M)
-            self.B = np.ones(self.N)
-        else:
-            assert A.shape == (self.M,) and B.shape == (self.N,)
-            self.A = A
-            self.B = B
-        ## LTD: random split train and val can not meet the assumption of Sogram
-        #assert (row_nnz > 0).all() and (col_nnz > 0).all(), "row_flag:{} col_flag:{}".format((row_nnz > 0).all(), (col_nnz > 0).all())
-        col_nnz = self.mn_matrix.sum(axis=0)
-        row_nnz = self.mn_matrix.sum(axis=1)
-        self.Ab = self.A / row_nnz.sum() #row_nnz.A1
-        self.Bb = self.B / col_nnz.sum() #col_nnz.A1
-
-    def __len__(self):
-        if not self.load_by_nnz:
-            return len(self.data)
-        else:
-            return len(self.coos[0])
-
-    def __getitem__(self, index):
-        if not self.load_by_nnz:
-            data = self.data[index]
-            return {
-                'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),  # the word_dict transformation and seq-clipping should be in _load_raw_data() for generalization
-                'label': torch.FloatTensor(self.label_binarizer.transform([data['label']])[0]),
-                'index': data.get('index', 0)
-            }
-        else:
-            coos_x = self.coos[0][index]
-            coos_y = self.coos[1][index]
-            data = self.data[coos_x]
-            return {
-                'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),  # the word_dict transformation and seq-clipping should be in _load_raw_data() for generalization
-                'label_data': torch.LongTensor([coos_y]) if self.label_data is None else torch.FloatTensor(self.label_data[coos_y]),
-                '_as': self.A[coos_x],
-                '_bs': self.B[coos_y],
-                '_abs': self.Ab[coos_x],
-                '_bbs': self.Bb[coos_y],
-                #'coos_x': coos_x,
-                #'coos_y': coos_y,
-                'index': data.get('index', 0)
-            }
-
 class TextDataset(Dataset):
     """Class for text dataset"""
 
@@ -215,7 +41,135 @@ class TextDataset(Dataset):
             'label': torch.FloatTensor(self.label_binarizer.transform([data['label']])[0]),
             'index': data.get('index', 0)
         }
-'''
+
+class TwoTowerDataset(Dataset):
+    """Class for text dataset for 2-tower structure"""
+
+    def __init__(self, U, V, Yu, Yv, A=None, B=None):
+        '''
+        U, V: the two feature matrices for the two corresponding tower
+        Yu: the relationship sparse matrix (from U to V)
+        Yv: the relationship sparse matrix (from V to U), can be None if Yu exists
+        A, B: the weight matrices for U and V
+        '''
+        self.U = U
+        self.V = V
+        self.Yu = csr_matrix(Yu)
+        self.Yv = csr_matrix(Yv)
+        self.M, self.N = self.Yu.shape
+        self.A = np.ones(self.M) if A is None else A
+        self.B = np.ones(self.N) if B is None else B
+        self.coos = self.Yu.nonzero() ## LTD, check if coos is a pointer
+        self.nnz = len(self.coos[0])
+        ## LTD, it's very likely that col_nnz have zero values.
+        col_nnz = self.Yu.sum(axis=0)
+        row_nnz = self.Yu.sum(axis=1)
+        assert (row_nnz > 0).all() and (col_nnz > 0).all(), "row_flag:{} col_flag:{}".format((row_nnz > 0).all(), (col_nnz > 0).all())
+        self.Ab = self.A / row_nnz.A1
+        self.Bb = self.B / col_nnz.A1
+        #self.Ab = self.A / row_nnz.sum()
+        #self.Bb = self.B / col_nnz.sum()
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def __getitem__(self, index):
+        raise NotImplementedError
+
+    @staticmethod
+    def generate_batch(data_batch):
+        raise NotImplementedError
+
+
+class NonzeroTextDataset(TwoTowerDataset):
+    """Class for text dataset for 2-tower structure"""
+
+    def __init__(self, U, V, Yu, Yv, A=None, B=None):
+        super(NonzeroTextDataset, self).__init__(U, V, Yu, Yv, A, B)
+
+    def __len__(self):
+        return self.nnz
+
+    def __getitem__(self, index: int):
+        coos_x = self.coos[0][index]
+        coos_y = self.coos[1][index]
+        return {
+                'u': self.U[coos_x],  # need to customize
+                'v': self.V[coos_y],
+                '_a': self.A[coos_x],
+                '_b': self.B[coos_y],
+                '_ab': self.Ab[coos_x],
+                '_bb': self.Bb[coos_y],
+                'y': self.Yu[coos_x, coos_y],
+                }
+
+    @staticmethod
+    def generate_batch(data_batch):
+        us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
+        vs = [torch.LongTensor(data['v']) for data in data_batch]
+        return {
+            'us': pad_sequence(us, batch_first=True),
+            'vs': pad_sequence(vs, batch_first=True),
+            '_as':  torch.FloatTensor([data['_a'] for data in data_batch]),
+            '_bs':  torch.FloatTensor([data['_b'] for data in data_batch]),
+            '_abs': torch.FloatTensor([data['_ab'] for data in data_batch]),
+            '_bbs': torch.FloatTensor([data['_bb'] for data in data_batch]),
+            'ys': torch.FloatTensor([data['y'] for data in data_batch]),
+        }
+
+
+class CrossTextDataset(TwoTowerDataset):
+    """Class for text dataset for 2-tower structure"""
+
+    def __init__(self, U, V, Yu, Yv, A=None, B=None):
+        super(CrossTextDataset, self).__init__(U, V, Yu, Yv, A, B)
+
+    #def __len__(self) -> tuple:
+    #    return (self.M, self.N)
+
+    def __getitem__(self, index: tuple):
+        coos_x, coos_y = index
+        return {
+                'us': self.U[coos_x],
+                'vs': self.V[coos_y],
+                '_as': self.A[coos_x],
+                '_bs': self.B[coos_y],
+                '_abs': self.Ab[coos_x],
+                '_bbs': self.Bb[coos_y],
+                'ys': self.Yu[coos_x, :][:, coos_y],
+                }
+
+    @staticmethod
+    def generate_batch(data_batch):
+        data = data_batch[0]
+        us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
+        vs = [torch.LongTensor(v) for v in data['vs']]
+        return {
+            'U': pad_sequence(us, batch_first=True),
+            'V': pad_sequence(vs, batch_first=True),
+            'A':  torch.FloatTensor(data['_as']),
+            'B':  torch.FloatTensor(data['_bs']),
+            'Ab': torch.FloatTensor(data['_abs']),
+            'Bb': torch.FloatTensor(data['_bbs']),
+            'Y': spmtx2tensor(data['ys']),
+        }
+
+
+class TextDatasetNew(TwoTowerDataset):
+    """Class for text dataset for 2-tower structure"""
+
+    def __init__(self, U, V, Yu, Yv, A=None, B=None):
+        super(TextDatasetNew, self).__init__(U, V, Yu, Yv, A, B)
+
+    def __len__(self):
+        return self.M
+
+    def __getitem__(self, index: int):
+        return {
+                'text': torch.LongTensor(self.U[index]),
+                'label': torch.FloatTensor(self.Yu[index].todense().A1),
+                'index': 0
+                }
 
 class CrossRandomBatchSampler(Sampler[Tuple]):
     data_source: Sized
@@ -250,6 +204,11 @@ class CrossRandomBatchSampler(Sampler[Tuple]):
     def __len__(self) -> int:
         return self.nb_i * self.nb_j
 
+def _build_mn_matrix(data, classes):
+    label_binarizer = MultiLabelBinarizer().fit([classes])
+    binary_label_matrix = [coo_matrix(label_binarizer.transform([d['label']])[0]) for d in data]
+    return sp_vstack(binary_label_matrix)
+
 def spmtx2tensor(spmtx):
     coo = coo_matrix(spmtx)
     idx = np.vstack((coo.row, coo.col))
@@ -259,34 +218,13 @@ def spmtx2tensor(spmtx):
     shape = coo.shape
     return torch.sparse_coo_tensor(idx, val, torch.Size(shape))
 
-def generate_batch_cross(data_batch):
-    data = data_batch[0]
-    us = [torch.LongTensor(u) for u in data['us']]
-    vs = [torch.LongTensor(v) for v in data['vs']]
-    return {
-        'U': pad_sequence(us, batch_first=True),
-        'V': pad_sequence(vs, batch_first=True),
-        'A':  torch.FloatTensor(data['_as']),
-        'B':  torch.FloatTensor(data['_bs']),
-        'Ab': torch.FloatTensor(data['_abs']),
-        'Bb': torch.FloatTensor(data['_bbs']),
-        'Y': spmtx2tensor(data['ys']),
-    }
-
-
-def generate_batch_nonzero(data_batch):
-    us = [torch.LongTensor(data['u']) for data in data_batch]
-    vs = [torch.LongTensor(data['v']) for data in data_batch]
-    return {
-        'us': pad_sequence(us, batch_first=True),
-        'vs': pad_sequence(vs, batch_first=True),
-        '_as':  torch.FloatTensor([data['_a'] for data in data_batch]),
-        '_bs':  torch.FloatTensor([data['_b'] for data in data_batch]),
-        '_abs': torch.FloatTensor([data['_ab'] for data in data_batch]),
-        '_bbs': torch.FloatTensor([data['_bb'] for data in data_batch]),
-        'ys': torch.FloatTensor([data['y'] for data in data_batch]),
-    }
-
+def _data_transform(max_seq_length, data, word_dict, classes):
+    U = np.array([[word_dict[word] for word in d['text'][:max_seq_length]] \
+            for d in data], dtype=object)
+    V = np.arange(len(classes)).reshape(-1, 1)
+    Yu = _build_mn_matrix(data, classes)
+    Yv = Yu.transpose()
+    return U,V, Yu, Yv
 
 def generate_batch(data_batch):
     text_list = [data['text'] for data in data_batch]
@@ -299,24 +237,27 @@ def generate_batch(data_batch):
 
 
 def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=True):
-    ### TLD, preprocess
     if train:
         if 'Ori' in config.loss:
             dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
         elif 'Sogram' in config.loss:
-            dataset = NonzeroTextDataset(data, word_dict, classes, config.max_seq_length)
+            U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
+            dataset = NonzeroTextDataset(U, V, Yu, Yv)
         else:
-            dataset = CrossTextDataset(data, word_dict, classes, config.max_seq_length)
+            U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
+            dataset = CrossTextDataset(U, V, Yu, Yv)
     else:
         dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
 
     if isinstance(dataset, CrossTextDataset):
         dataset_loader = torch.utils.data.DataLoader(
                 dataset,
-                batch_sampler=CrossRandomBatchSampler(dataset, bsize_i=config.batch_size, bsize_j=dataset.N),
-                num_workers=0, #config.data_workers,
-                collate_fn=generate_batch_cross,  # LTD, generate_batch() move to in dataset
-                #pin_memory='cuda' in config.device.type,
+                batch_sampler=CrossRandomBatchSampler(
+                    dataset, shuffle=shuffle,
+                    bsize_i=config.batch_size,
+                    bsize_j=config.batch_size_j if config.batch_size_j is not None else dataset.N),
+                num_workers=0,
+                collate_fn=dataset.generate_batch,  # LTD, generate_batch() move to in dataset
                 )
     else:
         dataset_loader = torch.utils.data.DataLoader(
@@ -324,7 +265,7 @@ def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=Tr
             batch_size=config.batch_size if train else config.eval_batch_size,
             shuffle=shuffle,
             num_workers=config.data_workers,
-            collate_fn=generate_batch_nonzero if train else generate_batch,
+            collate_fn=dataset.generate_batch if (train and 'Sogram' in config.loss) else generate_batch,
             pin_memory='cuda' in config.device.type,
         )
     return dataset_loader

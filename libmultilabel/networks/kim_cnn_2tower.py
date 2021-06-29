@@ -10,6 +10,7 @@ class KimCNN2Tower(BaseModel):
     def __init__(self, config, embed_vecs):
         super(KimCNN2Tower, self).__init__(config, embed_vecs)
 
+        # P tower
         self.filter_sizes = config.filter_sizes
         emb_dim = embed_vecs.shape[1]
         num_filter_per_size = config.num_filter_per_size
@@ -24,13 +25,13 @@ class KimCNN2Tower(BaseModel):
             self.convs.append(conv)
         conv_output_size = num_filter_per_size * len(self.filter_sizes)
 
-        self.Q = nn.Parameter(torch.Tensor(config.num_classes, conv_output_size))
-        self.reset_parameters()
+        # Q tower
+        self.Q = nn.Embedding(config.num_classes, conv_output_size)
 
     def reset_parameters(self) -> None:
-        nn.init.kaiming_uniform_(self.Q, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.Q_embedding.weight, a=math.sqrt(5))
 
-    def forward(self, text):
+    def forward(self, text, label_data=None):
         h = self.embedding(text) # (batch_size, length, embed_dim)
         h = self.embed_drop(h)
         h = h.transpose(1, 2) # (batch_size, embed_dim, length)
@@ -51,6 +52,9 @@ class KimCNN2Tower(BaseModel):
             h = h_list[0]
         P = self.activation(h) # (batch_size, total_num_filter)
 
-        Q = self.Q
+        if label_data is None:
+            Q = self.Q.weight
+        else:
+            Q = torch.squeeze(self.Q(label_data))
 
-        return P, self.Q
+        return P, Q

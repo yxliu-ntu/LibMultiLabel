@@ -136,7 +136,8 @@ class Model(object):
             train_loss.update(loss)
             progress_bar.set_postfix(loss=train_loss.avg)
             if idx < 100:
-                print(idx, loss) #batch['text'])
+                print(idx, loss) 
+                #print(batch)
             else:
                 exit(0)
 
@@ -166,8 +167,7 @@ class Model(object):
                 loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
             elif isinstance(mnloss, MNLoss.SogramMNLoss):
                 ps, qs = self.network(inputs['us'], inputs['vs'])
-                #ys = ps.new_ones(ps.size()[0]) # LTD, this should be read from data
-                ys = inputs['ys'] # LTD, this should be read from data
+                ys = inputs['ys']
                 pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
                 qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
                 _as = inputs['_as']
@@ -178,7 +178,6 @@ class Model(object):
             else:
                 P, Q = self.network(inputs['U'], inputs['V'])
                 Y = inputs['Y']
-                #Y = _dense_to_sparse(target_labels)
                 A = inputs['A']
                 B = inputs['B']
                 Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
