@@ -19,36 +19,32 @@ UNK = Vocab.UNK
 PAD = '**PAD**'
 
 
-class NonzeroTextDataset(NonzeroDataset):
-    @staticmethod
-    def generate_batch(data_batch):
-        us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
-        vs = [torch.LongTensor(data['v']) for data in data_batch]
-        return {
-            'us': pad_sequence(us, batch_first=True),
-            'vs': pad_sequence(vs, batch_first=True),
-            '_as':  torch.FloatTensor([data['_a'] for data in data_batch]),
-            '_bs':  torch.FloatTensor([data['_b'] for data in data_batch]),
-            '_abs': torch.FloatTensor([data['_ab'] for data in data_batch]),
-            '_bbs': torch.FloatTensor([data['_bb'] for data in data_batch]),
-            'ys': torch.FloatTensor([data['y'] for data in data_batch]),
-        }
+def generate_batch_nonzero(data_batch):
+    us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
+    vs = [torch.LongTensor(data['v']) for data in data_batch]
+    return {
+        'us': pad_sequence(us, batch_first=True),
+        'vs': pad_sequence(vs, batch_first=True),
+        '_as':  torch.FloatTensor([data['_a'] for data in data_batch]),
+        '_bs':  torch.FloatTensor([data['_b'] for data in data_batch]),
+        '_abs': torch.FloatTensor([data['_ab'] for data in data_batch]),
+        '_bbs': torch.FloatTensor([data['_bb'] for data in data_batch]),
+        'ys': torch.FloatTensor([data['y'] for data in data_batch]),
+    }
 
-class CrossTextDataset(CrossDataset):
-    @staticmethod
-    def generate_batch(data_batch):
-        data = data_batch[0]
-        us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
-        vs = [torch.LongTensor(v) for v in data['vs']]
-        return {
-            'U': pad_sequence(us, batch_first=True),
-            'V': pad_sequence(vs, batch_first=True),
-            'A':  torch.FloatTensor(data['_as']),
-            'B':  torch.FloatTensor(data['_bs']),
-            'Ab': torch.FloatTensor(data['_abs']),
-            'Bb': torch.FloatTensor(data['_bbs']),
-            'Y': _spmtx2tensor(data['ys']),
-        }
+def generate_batch_cross(data_batch):
+    data = data_batch[0]
+    us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
+    vs = [torch.LongTensor(v) for v in data['vs']]
+    return {
+        'U': pad_sequence(us, batch_first=True),
+        'V': pad_sequence(vs, batch_first=True),
+        'A':  torch.FloatTensor(data['_as']),
+        'B':  torch.FloatTensor(data['_bs']),
+        'Ab': torch.FloatTensor(data['_abs']),
+        'Bb': torch.FloatTensor(data['_bbs']),
+        'Y': _spmtx2tensor(data['ys']),
+    }
 
 class TextDataset(Dataset):
     """Class for text dataset"""
@@ -110,14 +106,14 @@ def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=Tr
             dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
         elif 'Sogram' in config.loss:
             U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
-            dataset = NonzeroTextDataset(U, V, Yu, Yv)
+            dataset = NonzeroDataset(U, V, Yu, Yv, generate_batch_nonzero)
         else:
             U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
-            dataset = CrossTextDataset(U, V, Yu, Yv)
+            dataset = CrossDataset(U, V, Yu, Yv, generate_batch_cross)
     else:
         dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
 
-    if isinstance(dataset, CrossTextDataset):
+    if isinstance(dataset, CrossDataset):
         dataset_loader = torch.utils.data.DataLoader(
                 dataset,
                 batch_sampler=CrossRandomBatchSampler(
