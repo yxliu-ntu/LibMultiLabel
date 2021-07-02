@@ -42,7 +42,8 @@ def get_config():
     # train
     parser.add_argument('--seed', type=int, help='Random seed (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10000, help='Number of epochs to train (default: %(default)s)')
-    parser.add_argument('--batch_size', type=int, default=16, help='Size of training batches (default: %(default)s)')
+    parser.add_argument('--batch_size', type=int, default=16, help='Size of training batches along rows (default: %(default)s)')
+    parser.add_argument('--batch_size_j', type=int, default=None, help='Size of training batches along cols (default: %(default)s)')
     parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd'], help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate for optimizer (default: %(default)s)')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay factor (default: %(default)s)')
@@ -58,6 +59,11 @@ def get_config():
     parser.add_argument('--dropout', type=float, default=0.2, help='Optional specification of dropout (default: %(default)s)')
     parser.add_argument('--dropout2', type=float, default=0.2, help='Optional specification of the second dropout (default: %(default)s)')
     parser.add_argument('--num_pool', type=int, default=1, help='Number of pool for dynamic max-pooling (default: %(default)s)')
+    parser.add_argument('--loss', type=str, choices=['Minibatch-LRSQ', 'Sogram-LRSQ', 'Naive-LRSQ', 'Naive-LRLR', 'Ori-LRLR'], default='Ori-LRLR', help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
+    parser.add_argument('--omega', type=float, default=1.0, help='Cost weight for the negative part of the loss function')
+    parser.add_argument('--alpha', type=float, default=1.0, help='Weight for updating Gramian')
+    parser.add_argument('--imp_r', type=float, default=0.0, help='Imputed value for the negative part of the loss function')
+    parser.add_argument('--k1', type=int, default=4, help='embedding dimension for imputed vectors')
 
     # eval
     parser.add_argument('--eval_batch_size', type=int, default=256, help='Size of evaluating batches (default: %(default)s)')
