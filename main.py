@@ -1,12 +1,13 @@
 import argparse
 import logging
 import os
+import yaml
 from datetime import datetime
 from pathlib import Path
 from functools import partial
 
+import numpy as np
 import pytorch_lightning as pl
-import yaml
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities.parsing import AttributeDict
@@ -14,8 +15,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from libmultilabel import data_utils, MNLoss
 from libmultilabel.model import Model
 from libmultilabel.two_tower_model import TwoTowerModel
-from libmultilabel.utils import (Timer, dump_log, init_device,
-                                 save_top_k_predictions, set_seed)
+from libmultilabel.utils import Timer, dump_log, init_device, set_seed
 
 
 def get_config():
@@ -150,6 +150,17 @@ def get_config():
     return config
 
 
+def save_predictions(trainer, model, dataloader, predict_out_path):
+    batch_predictions = trainer.predict(model, dataloaders=dataloader)
+    pred_labels = np.vstack([batch['top_k_pred'] for batch in batch_predictions])
+    pred_scores = np.vstack([batch['top_k_pred_scores'] for batch in batch_predictions])
+    with open(predict_out_path, 'w') as fp:
+        for pred_label, pred_score in zip(pred_labels, pred_scores):
+            out_str = ' '.join([f'{model.classes[label]}:{score:.4}' for label, score in zip(pred_label, pred_score)])
+            fp.write(out_str+'\n')
+    logging.info(f'Saved predictions to: {predict_out_path}')
+
+
 def main():
     config = get_config()
     log_level = logging.WARNING if config.silent else logging.INFO
@@ -188,9 +199,11 @@ def main():
 
     if config.eval:
         model = _Model.load_from_checkpoint(config.checkpoint_path)
+        model.config = config
     else:
         if config.checkpoint_path:
             model = _Model.load_from_checkpoint(config.checkpoint_path)
+            model.config = config
         else:
             word_dict = data_utils.load_or_build_text_dict(
                 config, datasets['train'])
@@ -220,7 +233,7 @@ def main():
                 'pin_memory': 'cuda' in config.device.type,
                 'embed_file': 'glove.6B.300d',
                 }
-            print(dlf_config)
+            #print(dlf_config)
             dataloader_factory = MNLoss.DataloaderFactory(
                     dlf_config,
                     partial(data_utils.newtokenize, word_dict=word_dict, max_seq_length=config.max_seq_length),
@@ -246,11 +259,8 @@ def main():
         trainer.test(model, test_dataloaders=test_loader)
         if config.save_k_predictions > 0:
             if not config.predict_out_path:
-                config.predict_out_path = os.path.join(
-                    checkpoint_dir, 'predictions.txt')
-            save_top_k_predictions(model.classes,
-                                   model.test_results.get_y_pred(),
-                                   config.predict_out_path, config.save_k_predictions)
+                config.predict_out_path = os.path.join(checkpoint_dir, 'predictions.txt')
+            save_predictions(trainer, model, test_loader, config.predict_out_path)
 
 
 if __name__ == '__main__':
