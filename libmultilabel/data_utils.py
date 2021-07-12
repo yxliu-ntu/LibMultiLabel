@@ -19,6 +19,11 @@ UNK = Vocab.UNK
 PAD = '**PAD**'
 
 
+def newtokenize(text, word_dict, max_seq_length):
+    text = ' '.join(text.split(','))
+    tokenizer = RegexpTokenizer(r'\w+')
+    return [word_dict[t.lower()] for t in tokenizer.tokenize(text) if not t.isnumeric()][:max_seq_length]
+
 def generate_batch_nonzero(data_batch):
     us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
     vs = [torch.LongTensor(data['v']) for data in data_batch]
@@ -65,7 +70,6 @@ class TextDataset(Dataset):
         return {
             'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),
             'label': torch.FloatTensor(self.label_binarizer.transform([data['label']])[0]),
-            'index': data.get('index', 0)
         }
 
 def _spmtx2tensor(spmtx):
@@ -94,7 +98,6 @@ def generate_batch(data_batch):
     text_list = [data['text'] for data in data_batch]
     label_list = [data['label'] for data in data_batch]
     return {
-        'index': [data['index'] for data in data_batch],
         'text': pad_sequence(text_list, batch_first=True),
         'label': torch.stack(label_list)
     }
@@ -111,14 +114,18 @@ def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=Tr
             U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
             dataset = CrossDataset(U, V, Yu, Yv, generate_batch_cross)
     else:
-        dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
+        if 'Ori' in config.loss:
+            dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
+        else:
+            U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
+            dataset = CrossDataset(U, V, Yu, Yv, generate_batch_cross)
 
     if isinstance(dataset, CrossDataset):
         dataset_loader = torch.utils.data.DataLoader(
                 dataset,
                 batch_sampler=CrossRandomBatchSampler(
-                    dataset, shuffle=shuffle,
-                    bsize_i=config.batch_size,
+                    dataset, shuffle=shuffle and train,
+                    bsize_i=config.batch_size if train else config.eval_batch_size,
                     bsize_j=config.batch_size_j if config.batch_size_j is not None else dataset.N),
                 num_workers=0,
                 collate_fn=dataset.generate_batch,  # LTD, generate_batch() move to in dataset

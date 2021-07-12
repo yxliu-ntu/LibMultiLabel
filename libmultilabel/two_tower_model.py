@@ -9,11 +9,12 @@ import torch.optim as optim
 from pytorch_lightning.utilities.parsing import AttributeDict
 
 from . import networks
+from . import MNLoss
 from .metrics import MultiLabelMetrics
 from .utils import dump_log
 
 
-class MultiLabelModel(pl.LightningModule):
+class TwoTowerBaseModel(pl.LightningModule):
     """Abstract class handling Pytorch Lightning training flow"""
 
     def __init__(self, config, *args, **kwargs):
@@ -50,12 +51,12 @@ class MultiLabelModel(pl.LightningModule):
         return optimizer
 
     @abstractmethod
-    def shared_step(self, batch):
-        """Return loss and predicted logits"""
+    def shared_step(self, batch, is_train):
+        """Return loss and network outputs"""
         return NotImplemented
 
     def training_step(self, batch, batch_idx):
-        loss, _ = self.shared_step(batch)
+        loss, _, _ = self.shared_step(batch, True)
         if batch_idx < 100:
             print(batch_idx, loss.item()) 
             #print(batch)
@@ -64,10 +65,11 @@ class MultiLabelModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, pred_logits = self.shared_step(batch)
-        return {'loss': loss.item(),
-                'pred_scores': torch.sigmoid(pred_logits).detach().cpu().numpy(),
-                'target': batch['label'].detach().cpu().numpy()}
+        loss, P, Q = self.shared_step(batch, False)
+        return {'loss': loss.item() if loss is not None else None,
+                'P': P.detach(),
+                'Q': Q.detach(),
+                'Y': batch['Y'].to_dense().cpu().numpy() if 'Y' in batch else batch['label'].detach().cpu().numpy()}
 
     def validation_epoch_end(self, step_outputs):
         eval_metric = self.evaluate(step_outputs, 'val')
@@ -84,8 +86,9 @@ class MultiLabelModel(pl.LightningModule):
     def evaluate(self, step_outputs, split):
         eval_metric = MultiLabelMetrics(self.config)
         for step_output in step_outputs:
-            eval_metric.add_values(y_pred=step_output['pred_scores'],
-                                   y_true=step_output['target'])
+            pred_scores = torch.sigmoid(step_output['P'] @ step_output['Q'].T).cpu().numpy()
+            eval_metric.add_values(y_pred=pred_scores,
+                                   y_true=step_output['Y'])
         metric_dict = eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
@@ -100,7 +103,7 @@ class MultiLabelModel(pl.LightningModule):
                 print(string)
 
 
-class Model(MultiLabelModel):
+class TwoTowerModel(TwoTowerBaseModel):
     def __init__(self, config, word_dict=None, classes=None):
         super().__init__(config)
         self.save_hyperparameters()
@@ -117,9 +120,49 @@ class Model(MultiLabelModel):
             init_weight = networks.get_init_weight_func(self.config)
             self.apply(init_weight)
 
-    def shared_step(self, batch):
-        target_labels = batch['label']
-        outputs = self.network(batch['text'])
-        pred_logits = outputs['logits']
-        loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels, reduction='sum')
-        return loss, pred_logits
+        # init loss
+        if self.config.loss == 'Ori-LRLR':
+            self.mnloss = None
+        elif self.config.loss == 'Naive-LRLR':
+            self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega,
+                    loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
+        elif self.config.loss == 'Naive-LRSQ':
+            self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
+        elif self.config.loss == 'Minibatch-LRSQ':
+            self.mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
+        elif self.config.loss == 'Sogram-LRSQ':
+            self.mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes),
+                    self.config.k1, alpha=self.config.alpha, omega=self.config.omega)
+        else:
+            raise
+
+    def shared_step(self, batch, is_train):
+        if self.mnloss is None:
+            target_labels = batch['label']
+            P, Q = self.network(batch['text'])
+            logits = P @ Q.T
+            loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
+            return loss, P, Q
+        elif isinstance(self.mnloss, MNLoss.SogramMNLoss) and is_train:
+            ps, qs = self.network(batch['us'], batch['vs'])
+            pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+            qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+            ys = batch['ys']
+            _as = batch['_as']
+            _bs = batch['_bs']
+            _abs = batch['_abs']
+            _bbs = batch['_bbs']
+            loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+            return loss, ps, qs
+        else:
+            P, Q = self.network(batch['U'], batch['V'])
+            if is_train:
+                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+                Y = batch['Y']
+                A = batch['A']
+                B = batch['B']
+                loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
+                return loss, P, Q
+            else:
+                return None, P, Q

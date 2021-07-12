@@ -4,6 +4,7 @@ LibMultiLabel is a simple tool with the following functionalities.
 
 - end-to-end services from raw texts to final evaluation/analysis
 - support of common network architectures for multi-label text classification
+- easy hyper-parameter selection
 
 This is an on-going development so many improvements are still being made. Comments are very welcome.
 
@@ -152,8 +153,7 @@ pip3 install -Ur requirements_parameter_search.txt
 ```
 We provide a program `search_params.py` to demonstrate how to run LibMultiLabel with Ray Tune. An example is as follows.
 ```
-python3 search_params.py  --config example_config/rcv1/cnn_tune.yml
-                          --search_alg basic_variant
+python3 search_params.py --config example_config/rcv1/cnn_tune.yml --search_alg basic_variant
 ```
 
 - **config**: configure *all* parameters in a yaml file. You can define a continuous, a discrete, or other types of search space (see a list [here](https://docs.ray.io/en/master/tune/api_docs/search_space.html#tune-sample-docs)). An example of configuring the parameters is presented as follows:
