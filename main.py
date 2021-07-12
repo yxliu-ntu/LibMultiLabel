@@ -233,7 +233,7 @@ def main():
                 'pin_memory': 'cuda' in config.device.type,
                 'embed_file': 'glove.6B.300d',
                 }
-            print(dlf_config)
+            #print(dlf_config)
             dataloader_factory = MNLoss.DataloaderFactory(
                     dlf_config,
                     partial(data_utils.newtokenize, word_dict=word_dict, max_seq_length=config.max_seq_length),
