@@ -1,4 +1,4 @@
-from torch._C import T
+from torch import Tensor as T
 from typing import Tuple
 from transformers import BertModel, BertConfig
 from torch import nn
