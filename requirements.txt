@@ -10,3 +10,5 @@ tqdm
 scipy
 numpy
 Cython
+transformers
+tensorflow==2.4

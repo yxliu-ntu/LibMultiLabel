@@ -1,0 +1,37 @@
+# data
+data_name: dpr
+data_dir: data/dpr
+bert_path: bert_models/bert_tiny
+trainL_path: data/dpr/trainL.demo.csv
+trainR_path: data/dpr/trainR.demo.csv
+validL_path: data/dpr/valL.demo.csv
+validR_path: data/dpr/valR.demo.csv
+testL_path: data/dpr/testL.demo.csv
+testR_path: data/dpr/testR.demo.csv
+#min_vocab_freq: 1
+#max_seq_length: 500
+
+# train
+shuffle: False
+seed: 1337
+epochs: 1 #50
+bsize_i: 4
+optimizer: adam
+learning_rate: 0.0005099137446356937
+weight_decay: 0
+patience: 5
+pad_id: 0
+
+# eval
+eval_batch_size: 1
+monitor_metrics: [P@1, P@3, P@5]
+val_metric: P@1
+
+# model
+model_name: Bert2Tower
+#num_filter_per_size: 128 # filter channels
+#filter_sizes: [2, 4, 8]
+#dropout: 0.0
+
+# pretrained vocab / embeddings
+#embed_file: glove.6B.300d

@@ -14,17 +14,40 @@ from .metrics import MultiLabelMetrics
 from .utils import dump_log, argsort_top_k
 
 
-class TwoTowerBaseModel(pl.LightningModule):
-    """Abstract class handling Pytorch Lightning training flow"""
-
+class TwoTowerModel(pl.LightningModule):
+    """Concrete class handling Pytorch Lightning training flow"""
     def __init__(self, config, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.save_hyperparameters()
+
         if isinstance(config, Namespace):
             config = vars(config)
         if isinstance(config, dict):
             config = AttributeDict(config)
         self.config = config
         self.eval_metric = MultiLabelMetrics(self.config)
+        self.network = getattr(networks, self.config.model_name)(self.config)
+
+        # init loss
+        if self.config.loss == 'DPR':
+            self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
+            self.step = self._dpr_step
+        #elif self.config.loss == 'Naive-LRLR':
+        #    self.step = self._minibatch_step
+        #    self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega,
+        #            loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
+        #elif self.config.loss == 'Naive-LRSQ':
+        #    self.step = self._minibatch_step
+        #    self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
+        elif self.config.loss == 'Minibatch':
+            self.mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
+            self.step = self._minibatch_step
+        elif self.config.loss == 'Sogram':
+            self.mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes),
+                    self.config.k1, alpha=self.config.alpha, omega=self.config.omega)
+            self.step = self._sogram_step
+        else:
+            raise
 
     def configure_optimizers(self):
         """Initialize an optimizer for the free parameters of the network.
@@ -51,18 +74,43 @@ class TwoTowerBaseModel(pl.LightningModule):
 
         return optimizer
 
-    @abstractmethod
-    def shared_step(self, batch, is_train):
-        """Return loss and network outputs"""
-        return NotImplemented
+    def _dpr_step(self, batch):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        #ys = torch.diag(batch['ys'])
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = ps @ qs.T  # (m, m)
+        loss = self.mnloss(logits, ys)
+        return loss#, P, Q
+
+    def _sogram_step(self, batch):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = batch['ys']
+        _as = batch['_as']
+        _bs = batch['_bs']
+        _abs = batch['_abs']
+        _bbs = batch['_bbs']
+        loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+        return loss#, ps, qs
+
+    def _minibatch_step(self, batch):
+        P, Q = self.network(batch['U'], batch['V'])
+        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        Y = batch['Y']
+        A = batch['A']
+        B = batch['B']
+        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
+        return loss#, P, Q
 
     def training_step(self, batch, batch_idx):
-        loss, _, _ = self.shared_step(batch, True)
-        if batch_idx < 100:
-            print(batch_idx, loss.item()) 
-            #print(batch)
-        else:
-            exit(0)
+        loss = self.step(batch)
+        #if batch_idx < 100:
+        #    print(batch_idx, loss.item()) 
+        #    #print(batch)
+        #else:
+        #    exit(0)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -84,7 +132,7 @@ class TwoTowerBaseModel(pl.LightningModule):
         return self._shared_eval_epoch_end(step_outputs, 'test')
 
     def _shared_eval_step(self, batch, batch_idx):
-        loss, P, Q = self.shared_step(batch, False)
+        P, Q = self.network(batch['U'], batch['V'])
         pred_logits = P.detach() @ Q.detach().T
         return {'loss': loss.item() if loss is not None else None,
                 'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
@@ -107,77 +155,12 @@ class TwoTowerBaseModel(pl.LightningModule):
         self.eval_metric.reset()
         return metric_dict
 
-    def predict_step(self, batch, batch_idx, dataloader_idx):
-        outputs = self.network(batch['text'])
-        pred_scores= torch.sigmoid(outputs['logits']).detach().cpu().numpy()
-        k = self.config.save_k_predictions
-        top_k_idx = argsort_top_k(pred_scores, k, axis=1)
-        top_k_scores = np.take_along_axis(pred_scores, top_k_idx, axis=1)
+    #def predict_step(self, batch, batch_idx, dataloader_idx):
+    #    outputs = self.network(batch['text'])
+    #    pred_scores= torch.sigmoid(outputs['logits']).detach().cpu().numpy()
+    #    k = self.config.save_k_predictions
+    #    top_k_idx = argsort_top_k(pred_scores, k, axis=1)
+    #    top_k_scores = np.take_along_axis(pred_scores, top_k_idx, axis=1)
 
-        return {'top_k_pred': top_k_idx,
-                'top_k_pred_scores': top_k_scores}
-
-
-class TwoTowerModel(TwoTowerBaseModel):
-    def __init__(self, config, word_dict=None, classes=None):
-        super().__init__(config)
-        self.save_hyperparameters()
-
-        self.word_dict = word_dict
-        self.classes = classes
-        self.config.num_classes = len(self.classes)
-
-        embed_vecs = self.word_dict.vectors
-        self.network = getattr(networks, self.config.model_name)(
-            self.config, embed_vecs)
-
-        if config.init_weight is not None:
-            init_weight = networks.get_init_weight_func(self.config)
-            self.apply(init_weight)
-
-        # init loss
-        if self.config.loss == 'Ori-LRLR':
-            self.mnloss = None
-        elif self.config.loss == 'Naive-LRLR':
-            self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega,
-                    loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
-        elif self.config.loss == 'Naive-LRSQ':
-            self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
-        elif self.config.loss == 'Minibatch-LRSQ':
-            self.mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
-        elif self.config.loss == 'Sogram-LRSQ':
-            self.mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes),
-                    self.config.k1, alpha=self.config.alpha, omega=self.config.omega)
-        else:
-            raise
-
-    def shared_step(self, batch, is_train):
-        if self.mnloss is None:
-            target_labels = batch['label']
-            P, Q = self.network(batch['text'])
-            logits = P @ Q.T
-            loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
-            return loss, P, Q
-        elif isinstance(self.mnloss, MNLoss.SogramMNLoss) and is_train:
-            ps, qs = self.network(batch['us'], batch['vs'])
-            pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-            qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-            ys = batch['ys']
-            _as = batch['_as']
-            _bs = batch['_bs']
-            _abs = batch['_abs']
-            _bbs = batch['_bbs']
-            loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-            return loss, ps, qs
-        else:
-            P, Q = self.network(batch['U'], batch['V'])
-            if is_train:
-                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-                Y = batch['Y']
-                A = batch['A']
-                B = batch['B']
-                loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
-                return loss, P, Q
-            else:
-                return None, P, Q
+    #    return {'top_k_pred': top_k_idx,
+    #            'top_k_pred_scores': top_k_scores}

@@ -1,18 +1,22 @@
-from torch._C import T
+#from torch._C import T
 from typing import Tuple
 from transformers import BertModel, BertConfig
 from torch import nn
-from models.biencoder import BiEncoder
+from .biencoder import BiEncoder
 
 def get_bert_biencoder_componets(config,  **kwargs):
     dropout = config.dropout if hasattr(config, 'dropout') else 0.0
+    if not hasattr(config, 'pretrained_model_cfg'):
+        config.pretrained_model_cfg = 'bert'
+    if not hasattr(config, 'projection_dim'):
+        config.projection_dim = 0
     bert_path = config.bert_path
     question_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
                                                     cfg_name=config.pretrained_model_cfg,
                                                     projection_dim=config.projection_dim,
-                                                    dropout = dropout, **kwargs)
+                                                    dropout=dropout, **kwargs)
     ctx_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
-                                            cfg_name=config.pretrain_model_cfg, 
+                                            cfg_name=config.pretrained_model_cfg,
                                             projection_dim=config.projection_dim,
                                             dropout=dropout,**kwargs)
     fix_ctx_encoder = config.fix_ctx_encoder if hasattr(config, 'fix_ctx_encoder') else False
@@ -28,14 +32,15 @@ class HFBertEncoder(BertModel):
         self.init_weights()
 
     @classmethod
-    def init_encoder(cls, bert_path :str, cfg_name: str, projection_dim: int =0, dropout:float =0.1 **kwargs) -> BertModel:
+    def init_encoder(cls, bert_path :str, cfg_name: str, projection_dim: int =0, dropout:float =0.1, **kwargs) -> BertModel:
         cfg = BertConfig.from_pretrained(bert_path)
         if dropout != 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-        return cls.from_pretrained(bert_path, config=cfg, projection_dim=projection_dim, **kwargs)
+        return cls.from_pretrained(bert_path, config=cfg, **kwargs)
     
-    def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
+    #def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
+    def forward(self, input_ids, token_type_ids, attention_mask):
         if self.config.output_hidden_states:
             sequence_output, pooled_output, hidden_states = super().forward(input_ids=input_ids,
                                                                             token_type_ids= token_type_ids,
