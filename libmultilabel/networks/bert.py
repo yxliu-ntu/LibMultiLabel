@@ -8,6 +8,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 class Bert2Tower(nn.Module):
     def __init__(self, config):
         #config requires bert model path, pad_id
+        super().__init__()
         self.config = config
         self.pad_id = config.pad_id
         logging.info("***** Initializing components for training *****")
@@ -18,8 +19,7 @@ class Bert2Tower(nn.Module):
         context_segments = torch.zeros_like(context_ids)
         question_attn_mask = self.__get_attn_mask(question_ids)
         context_attn_mask = self.__get_attn_mask(context_ids)
-        if self.bert.training:
-            model_out = self.bert(question_ids, question_segments, question_attn_mask,
+        model_out = self.bert(question_ids, question_segments, question_attn_mask,
                                 context_ids, context_segments, context_attn_mask)
         P, Q = model_out
         return P, Q

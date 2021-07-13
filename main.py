@@ -163,7 +163,7 @@ def get_config():
     for i in ['trainL', 'trainR', 'validL', 'validR', 'testL', 'testR']:
         if config['%s_path'%i] is None:
             config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
-    config['dataset_type'] = 'cross' if 'Sogram' not in config.loss else 'nonzero'
+    config['dataset_type'] = 'cross' if 'Minibatch' in config.loss else 'nonzero'
     return config
 
 

@@ -1,15 +1,16 @@
 #from torch._C import T
 from typing import Tuple
-from transformers import BertModel, BertConfig
+from transformers import BertModel, BertConfig, PretrainedConfig
 from torch import nn
 from .biencoder import BiEncoder
 
 def get_bert_biencoder_componets(config,  **kwargs):
     dropout = config.dropout if hasattr(config, 'dropout') else 0.0
     if not hasattr(config, 'pretrained_model_cfg'):
-        config.pretrained_model_cfg = 'bert'
+        config.pretrained_model_cfg = ''
     if not hasattr(config, 'projection_dim'):
         config.projection_dim = 0
+    #config = PretrainedConfig.from_dict(config)
     bert_path = config.bert_path
     question_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
                                                     cfg_name=config.pretrained_model_cfg,
@@ -26,7 +27,7 @@ def get_bert_biencoder_componets(config,  **kwargs):
 
 class HFBertEncoder(BertModel):
     def __init__(self, config, project_dim: int = 0):
-        super().__init__(self, config)
+        super().__init__(config)
         assert config.hidden_size > 0, 'Encoder hidden_size can\'t be zero'
         self.encode_proj = nn.Linear(config.hidden_size, project_dim) if project_dim != 0 else None
         self.init_weights()
@@ -41,15 +42,17 @@ class HFBertEncoder(BertModel):
     
     #def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
     def forward(self, input_ids, token_type_ids, attention_mask):
+        res = super().forward(input_ids = input_ids,
+                token_type_ids = token_type_ids,
+                attention_mask = attention_mask)
         if self.config.output_hidden_states:
-            sequence_output, pooled_output, hidden_states = super().forward(input_ids=input_ids,
-                                                                            token_type_ids= token_type_ids,
-                                                                            attention_mask = attention_mask)
+            sequence_output = res['last_hidden_state']
+            pooled_output = res['pooler_output']
+            hidden_states = res['hidden_states'] 
         else:
+            sequence_output = res['last_hidden_state']
+            pooled_output = res['pooler_output']
             hidden_states = None
-            sequence_output, pooled_output = super().forward(input_ids = input_ids,
-                                                            token_type_ids = token_type_ids,
-                                                            attention_mask = attention_mask)
         pooled_output = sequence_output[:,0,:]
         if self.encode_proj:
             pooled_output = self.encode_proj(pooled_output)
