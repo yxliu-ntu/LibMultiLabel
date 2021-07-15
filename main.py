@@ -98,7 +98,7 @@ def get_config():
                         help='Weight initialization to be used (default: %(default)s)')
     parser.add_argument('--activation', default='relu',
                         help='Activation function to be used (default: %(default)s)')
-    parser.add_argument('--k', type=int, default=64,
+    parser.add_argument('--k', type=int, default=128,
                         help='embedding dimension for each tower')
     parser.add_argument('--k1', type=int, default=4,
                         help='embedding dimension for imputed vectors')
@@ -214,9 +214,6 @@ def main():
     train_loader = dataloaders['train']
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
-    #for batch in train_loader:
-    #    print(batch)
-    #    exit(0)
 
     trainer = pl.Trainer(logger=False,
                          num_sanity_val_steps=0,

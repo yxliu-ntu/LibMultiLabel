@@ -43,7 +43,7 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
             self.step = self._minibatch_step
         elif self.config.loss == 'Sogram':
-            self.mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes),
+            self.mnloss = MNLoss.SogramMNLoss(self.config.k,
                     self.config.k1, alpha=self.config.alpha, omega=self.config.omega)
             self.step = self._sogram_step
         else:
@@ -78,7 +78,7 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         #ys = torch.diag(batch['ys'])
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-        logits = ps @ qs.T  # (m, m)
+        logits = ps @ qs.T # (m, m)
         loss = self.mnloss(logits, ys)
         return loss#, P, Q
 
@@ -134,9 +134,8 @@ class TwoTowerModel(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
         pred_logits = P.detach() @ Q.detach().T
-        return {'loss': loss.item() if loss is not None else None,
-                'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
-                'target': batch['Y'].to_dense().cpu().numpy() if 'Y' in batch else batch['label'].detach().cpu().numpy()}
+        return {'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
+                'target': batch['Y'].cpu().to_dense().numpy() if 'Y' in batch else batch['label'].detach().cpu().numpy()}
 
     def _shared_eval_step_end(self, batch_parts):
         pred_scores = np.vstack(batch_parts['pred_scores'])

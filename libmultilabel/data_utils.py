@@ -27,7 +27,6 @@ def newtokenize(text, word_dict, max_seq_length):
 def generate_batch_nonzero(data_batch):
     us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
     vs = [torch.LongTensor(data['v']) for data in data_batch]
-    us[0] = torch.nn.functional.pad(us[0], (0, 500-us[0].shape[0]), "constant", 0)
     return {
         'us': pad_sequence(us, batch_first=True),
         'vs': pad_sequence(vs, batch_first=True),
