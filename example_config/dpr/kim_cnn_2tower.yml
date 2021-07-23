@@ -14,7 +14,7 @@ testR_path: data/dpr/testR.demo.csv
 # train
 shuffle: False
 seed: 1337
-epochs: 1 #50
+epochs: 50
 bsize_i: 4
 optimizer: adam
 learning_rate: 0.0005099137446356937
@@ -23,9 +23,9 @@ patience: 5
 pad_id: 0
 
 # eval
-eval_batch_size: 1
-monitor_metrics: [P@1, P@3, P@5]
-val_metric: P@1
+eval_bsize_i: 4
+monitor_metrics: [R@20, R@100]
+val_metric: R@20
 
 # model
 model_name: Bert2Tower

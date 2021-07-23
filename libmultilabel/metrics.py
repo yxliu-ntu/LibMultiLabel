@@ -1,6 +1,7 @@
 import re
 
 import numpy as np
+from scipy.stats import rankdata
 from sklearn.metrics import multilabel_confusion_matrix
 
 from .utils import argsort_top_k
@@ -21,6 +22,15 @@ def precision_recall_at_ks(y_true, y_pred, top_ks):
         scores[f'R@{k}'] = np.mean(n_pos_in_top_k / (n_pos + 1e-10)).item()  # recall at k
     return scores
 
+def get_ranks(y_pred, y_true):
+    positive_idx_per_question = y_true.nonzero()[1]
+    indices = np.argsort(y_pred*-1, axis=1, kind='stable')
+    ranks = []
+    for i, idx in enumerate(positive_idx_per_question):
+        # aggregate the rank of the known gold passage in the sorted results for each question
+        gold_idx = (indices[i, :] == idx).ravel().nonzero()[-1][0]
+        ranks.append(gold_idx + 1)
+    return ranks
 
 class MultiLabelMetrics():
     def __init__(self, config):
@@ -30,6 +40,7 @@ class MultiLabelMetrics():
         self.n_eval = 0
         self.multilabel_confusion_matrix = 0.
         self.metric_stats = {}
+        self.ranks = []
 
         self.top_ks = set()
         self.prec_recall_metrics = []
@@ -39,11 +50,12 @@ class MultiLabelMetrics():
                 self.top_ks.add(top_k)
                 self.metric_stats[metric] = 0.
                 self.prec_recall_metrics.append(metric)
-            elif metric not in ['Micro-Precision', 'Micro-Recall', 'Micro-F1', 'Macro-F1', 'Another-Macro-F1']:
+            elif metric not in ['Micro-Precision', 'Micro-Recall', 'Micro-F1', 'Macro-F1', 'Another-Macro-F1', 'Aver-Rank']:
                 raise ValueError(f'Invalid metric: {metric}')
 
     def reset(self):
         self.n_eval = 0
+        self.ranks = []
         self.multilabel_confusion_matrix = 0.
         for metric in self.metric_stats:
             self.metric_stats[metric] = 0.
@@ -67,6 +79,10 @@ class MultiLabelMetrics():
         for metric in self.prec_recall_metrics:
             self.metric_stats[metric] += (scores[metric] * n_eval)
 
+        # Add averaged rank
+        _ranks = get_ranks(y_pred, y_true)
+        self.ranks.extend(_ranks)
+
     def get_metric_dict(self):
         """Get evaluation results."""
 
@@ -84,15 +100,15 @@ class MultiLabelMetrics():
         macro_recall = labelwise_recall.mean()
 
         result = {
-            'Micro-Precision': micro_precision,
-            'Micro-Recall': micro_recall,
-            'Micro-F1': f1(micro_precision, micro_recall),
-            'Macro-F1': f1(labelwise_precision, labelwise_recall).mean(),
-
-            # The f1 value of macro_precision and macro_recall. This variant of
-            # macro_f1 is less preferred but is used in some works. Please
-            # refer to Opitz et al. 2019 [https://arxiv.org/pdf/1911.03347.pdf]
-            'Another-Macro-F1': f1(macro_precision, macro_recall),
+                #'Micro-Precision': micro_precision,
+                #'Micro-Recall': micro_recall,
+                #'Micro-F1': f1(micro_precision, micro_recall),
+                #'Macro-F1': f1(labelwise_precision, labelwise_recall).mean(),
+                ## The f1 value of macro_precision and macro_recall. This variant of
+                ## macro_f1 is less preferred but is used in some works. Please
+                ## refer to Opitz et al. 2019 [https://arxiv.org/pdf/1911.03347.pdf]
+                #'Another-Macro-F1': f1(macro_precision, macro_recall),
+                'Aver-Rank': sum(self.ranks)/len(self.ranks)/100.,
         }
         for metric, val in self.metric_stats.items():
             result[metric] = val / self.n_eval

@@ -60,19 +60,23 @@ def get_config():
     #                    help='The minimum frequency needed to include a token in the vocabulary (default: %(default)s)')
     #parser.add_argument('--max_seq_length', type=int, default=500,
     #                    help='The maximum number of tokens of a sample (default: %(default)s)')
-    #parser.add_argument('--shuffle', type=bool, default=True,
-    #                    help='Whether to shuffle training data before each epoch (default: %(default)s)')
+    parser.add_argument('--shuffle', type=bool, default=True,
+                        help='Whether to shuffle training data before each epoch (default: %(default)s)')
+    parser.add_argument('--drop_last', type=bool, default=False,
+                        help='Whether to drop the last batch each epoch (default: %(default)s)')
 
     # train
     parser.add_argument('--seed', type=int,
                         help='Random seed (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10000,
                         help='Number of epochs to train (default: %(default)s)')
+    parser.add_argument('--warmup_steps', type=int, default=0.0,
+                        help='Number of warm-up steps for training (default: %(default)s)')
     parser.add_argument('--bsize_i', type=int, default=16,
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
-    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd'],
+    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adamw-dpr'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
                         help='Learning rate for optimizer (default: %(default)s)')
@@ -82,6 +86,10 @@ def get_config():
                         help='Momentum factor for SGD only (default: %(default)s)')
     parser.add_argument('--patience', type=int, default=5,
                         help='Number of epochs to wait for improvement before early stopping (default: %(default)s)')
+    parser.add_argument('--gradient_clip_val', type=float, default=0.0,
+                        help='value for clipping gradient, 0 means don’t clip')
+    parser.add_argument('--gradient_clip_algorithm', type=str, choices=['norm', 'value'], default='norm',
+                        help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'DPR'], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
@@ -108,15 +116,15 @@ def get_config():
     #                    help='Number of filters in convolutional layers in each size (default: %(default)s)')
     #parser.add_argument('--filter_sizes', type=int, nargs='+',
     #                    default=[4], help='Size of convolutional filters (default: %(default)s)')
-    #parser.add_argument('--dropout', type=float, default=0.2,
-    #                    help='Optional specification of dropout (default: %(default)s)')
+    parser.add_argument('--dropout', type=float, default=0.2,
+                        help='Optional specification of dropout (default: %(default)s)')
     #parser.add_argument('--dropout2', type=float, default=0.2,
     #                    help='Optional specification of the second dropout (default: %(default)s)')
     #parser.add_argument('--num_pool', type=int, default=1,
     #                    help='Number of pool for dynamic max-pooling (default: %(default)s)')
 
     # eval
-    parser.add_argument('--eval_bsize_i', type=int, default=256,
+    parser.add_argument('--eval_bsize_i', type=int, default=512,
                         help='Size of evaluating batches (default: %(default)s)')
     parser.add_argument('--metrics_threshold', type=float, default=0.5,
                         help='Thresholds to monitor for metrics (default: %(default)s)')
@@ -140,6 +148,8 @@ def get_config():
     #                    help='Path to the an output file holding top 100 label results (default: %(default)s)')
 
     # others
+    parser.add_argument('--max_seq_len', type=int, default=256,
+                        help='max sequence lenght')
     parser.add_argument('--loaderFactory', action='store_true',
                         help='Use dataloaderFactory')
     parser.add_argument('--cpu', action='store_true',
@@ -177,6 +187,10 @@ def get_config():
 #            fp.write(out_str+'\n')
 #    logging.info(f'Saved predictions to: {predict_out_path}')
 
+def data_proc(x, max_seq_len):
+    x = [int(i.split(':')[0]) for i in x.split(',')]
+    x = [101] + x + [102] + [0]*(max_seq_len-len(x)-3) + [102]
+    return x
 
 def main():
     config = get_config()
@@ -205,8 +219,8 @@ def main():
 
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
-            lambda x: [int(i.split(':')[0]) for i in x.split(',')],
-            lambda x: [int(i.split(':')[0]) for i in x.split(',')],
+            partial(data_proc, max_seq_len=config.max_seq_len),
+            partial(data_proc, max_seq_len=config.max_seq_len),
             data_utils.generate_batch_cross,
             data_utils.generate_batch_nonzero
             )
@@ -214,12 +228,16 @@ def main():
     train_loader = dataloaders['train']
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
+    assert valid_loader is not None
+    config['total_steps'] = config.epochs * len(train_loader)
 
     trainer = pl.Trainer(logger=False,
                          num_sanity_val_steps=0,
                          gpus=0 if config.cpu else 1,
                          progress_bar_refresh_rate=0 if config.silent else 1,
                          max_epochs=config.epochs,
+                         gradient_clip_val=config.gradient_clip_val,
+                         gradient_clip_algorithm=config.gradient_clip_algorithm,
                          callbacks=[checkpoint_callback, earlystopping_callback])
 
     if config.eval:
@@ -237,7 +255,8 @@ def main():
         logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
         model = _Model.load_from_checkpoint(checkpoint_callback.best_model_path)
 
-    trainer.test(model, test_dataloaders=test_loader)
+    if test_loader is not None:
+        trainer.test(model, test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':

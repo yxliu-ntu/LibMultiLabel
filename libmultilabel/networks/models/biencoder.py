@@ -14,8 +14,13 @@ class BiEncoder(nn.Module):
         self.poly_m = poly_m
 
     @staticmethod
-    def get_representation(sub_model:nn.Module, ids: T, segments: T, 
-                            attn_mask: T, fix_encoder:bool=False):
+    def get_representation(
+            sub_model:nn.Module,
+            ids: T,
+            segments: T,
+            attn_mask: T,
+            fix_encoder:bool=False
+            ):
         sequence_output = None
         pooled_output = None
         hidden_states = None
@@ -23,21 +28,43 @@ class BiEncoder(nn.Module):
         if ids is not None:
             if fix_encoder:
                 with torch.no_grad():
-                    sequence_output, pooled_output, hidden_states = sub_model(ids, segments, attn_mask)
+                    sequence_output, pooled_output, hidden_states = sub_model(
+                            ids,
+                            segments,
+                            attn_mask
+                            )
                 if sub_model.training:
                     sequence_output.requires_grad_(requires_grad=True)
-                    pooled_output.requires_grad_(requires_grad = True)
+                    pooled_output.requires_grad_(requires_grad=True)
             else:
-                sequence_output, pooled_output, hidden_states = sub_model(ids, segments, attn_mask)
+                sequence_output, pooled_output, hidden_states = sub_model(
+                        ids,
+                        segments,
+                        attn_mask
+                        )
         return sequence_output, pooled_output, hidden_states
     
-    def forward(self, question_ids:T, question_segments:T, question_attn_mask:T,
-                     context_ids:T, ctx_segments:T,ctx_attn_mask:T) -> Tuple[T,T]:
-        _q_seq, q_pooled_out, q_hidden = self.get_representation(self.question_model, question_ids,
-                                                                question_segments, question_attn_mask,
-                                                                self.fix_q_encoder)
-        _ctx_seq, ctx_pooled_out, ctx_hidden = self.get_representation(self.ctx_model, context_ids, ctx_segments,
-                                                                        ctx_attn_mask, self.fix_ctx_encoder)
+    def forward(self,
+            question_ids:T,
+            question_segments:T,
+            question_attn_mask:T,
+            context_ids:T,
+            ctx_segments:T,
+            ctx_attn_mask:T
+            ) -> Tuple[T,T]:
+        _q_seq, q_pooled_out, q_hidden = self.get_representation(
+                self.question_model,
+                question_ids,
+                question_segments,
+                question_attn_mask,
+                self.fix_q_encoder
+                )
+        _ctx_seq, ctx_pooled_out, ctx_hidden = self.get_representation(
+                self.ctx_model,
+                context_ids,
+                ctx_segments,
+                ctx_attn_mask,
+                self.fix_ctx_encoder)
         return q_pooled_out, ctx_pooled_out
 
             

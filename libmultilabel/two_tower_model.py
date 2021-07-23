@@ -1,11 +1,11 @@
-from abc import abstractmethod
-from argparse import Namespace
-
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from abc import abstractmethod
+from argparse import Namespace
+from torch.optim.lr_scheduler import LambdaLR
 from pytorch_lightning.utilities.parsing import AttributeDict
 
 from . import networks
@@ -50,10 +50,60 @@ class TwoTowerModel(pl.LightningModule):
             raise
 
     def configure_optimizers(self):
-        """Initialize an optimizer for the free parameters of the network.
         """
+        Initialize an optimizer for the free parameters of the network.
+        """
+        def _get_dpr_optimizer(
+                model: torch.nn.Module,
+                learning_rate: float = 1e-5,
+                adam_eps: float = 1e-8,
+                weight_decay: float = 0.0,
+                ) -> torch.optim.Optimizer:
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p for n, p in model.named_parameters()
+                        if not any(nd in n for nd in no_decay)
+                        ],
+                    "weight_decay": weight_decay,
+                },
+                {
+                    "params": [
+                        p for n, p in model.named_parameters()
+                        if any(nd in n for nd in no_decay)
+                        ],
+                    "weight_decay": 0.0,
+                },
+            ]
+            optimizer = optim.AdamW(parameters, lr=learning_rate, eps=adam_eps)
+            return optimizer
+
+        def _get_schedule_linear(
+                optimizer,
+                warmup_steps,
+                total_training_steps,
+                steps_shift=0,
+                last_epoch=-1,
+                ):
+            """
+            Create a schedule with a learning rate that decreases linearly after
+            linearly increasing during a warmup period.
+            """
+            def _lr_lambda(current_step):
+                #print(current_step, warmup_steps, total_training_steps)
+                current_step += steps_shift
+                if current_step < warmup_steps:
+                    return float(current_step) / float(max(1, warmup_steps))
+                return max(
+                        1e-7,
+                        float(total_training_steps - current_step) / float(max(1, total_training_steps - warmup_steps)),
+                        )
+            return LambdaLR(optimizer, _lr_lambda, last_epoch)
+
         parameters = [p for p in self.parameters() if p.requires_grad]
         optimizer_name = self.config.optimizer
+        scheduler = None
         if optimizer_name == 'sgd':
             optimizer = optim.SGD(parameters, self.config.learning_rate,
                                   momentum=self.config.momentum,
@@ -66,13 +116,33 @@ class TwoTowerModel(pl.LightningModule):
             optimizer = optim.AdamW(parameters,
                                     weight_decay=self.config.weight_decay,
                                     lr=self.config.learning_rate)
+        elif optimizer_name == 'adamw-dpr':
+            interval = 'step'
+            optimizer = _get_dpr_optimizer(
+                    self.network,
+                    learning_rate=self.config.learning_rate,
+                    weight_decay=self.config.weight_decay,
+                    )
+            scheduler = _get_schedule_linear(
+                    optimizer,
+                    self.config.warmup_steps,
+                    self.config.total_steps
+                    )
         else:
             raise RuntimeError(
                 'Unsupported optimizer: {self.config.optimizer}')
+        #torch.nn.utils.clip_grad_value_(parameters, 0.5)
 
-        torch.nn.utils.clip_grad_value_(parameters, 0.5)
-
-        return optimizer
+        if scheduler is None:
+            return optimizer
+        else:
+            return {
+                    "optimizer": optimizer,
+                    "lr_scheduler": {
+                        "scheduler": scheduler,
+                        "interval": interval,
+                        }
+                    }
 
     def _dpr_step(self, batch):
         ps, qs = self.network(batch['us'], batch['vs'])
@@ -80,6 +150,18 @@ class TwoTowerModel(pl.LightningModule):
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = ps @ qs.T # (m, m)
         loss = self.mnloss(logits, ys)
+        f = open('./train.log', 'a')
+        print('-'*10, file=f)
+        #for _i in range(batch['us'].shape[0]):
+        #    #print(batch['us'][_i, :], file=f)
+        #    print(ps[_i, :], file=f)
+        #for _i in range(batch['vs'].shape[0]):
+        #    #print(batch['vs'][_i, :], file=f)
+        #    print(qs[_i, :], file=f)
+        print(batch['us'].detach().sum().item(), batch['vs'].detach().sum().item(), file=f)
+        print(ps.detach().sum().item(), qs.detach().sum().item(), file=f)
+        print('loss:', loss.item(), file=f)
+        f.close()
         return loss#, P, Q
 
     def _sogram_step(self, batch):
@@ -105,6 +187,8 @@ class TwoTowerModel(pl.LightningModule):
         return loss#, P, Q
 
     def training_step(self, batch, batch_idx):
+        #opt = self.optimizers()
+        #print(opt.param_groups[0]["lr"])
         loss = self.step(batch)
         #if batch_idx < 100:
         #    print(batch_idx, loss.item()) 
@@ -134,7 +218,18 @@ class TwoTowerModel(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
         pred_logits = P.detach() @ Q.detach().T
-        return {'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
+        #f = open('./test.log', 'a')
+        #print('-.'*10, file=f)
+        #for _i in range(batch['U'].shape[0]):
+        #    print('>>>U<<<', batch['U'][_i, :], file=f)
+        #    print(','.join(['%.6f'%s for s in pred_logits.cpu().numpy()[_i,:]]), file=f)
+        #for _i in range(batch['V'].shape[0]):
+        #    print('>>>V<<<', batch['V'][_i, :], file=f)
+        #print(batch['U'].detach().sum().item(), batch['V'].detach().sum().item(), file=f)
+        #print(P.detach().sum().item(), Q.detach().sum().item(), file=f)
+        #f.close()
+        #return {'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
+        return {'pred_scores': pred_logits.cpu().numpy(),
                 'target': batch['Y'].cpu().to_dense().numpy() if 'Y' in batch else batch['label'].detach().cpu().numpy()}
 
     def _shared_eval_step_end(self, batch_parts):
@@ -144,6 +239,9 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_epoch_end(self, step_outputs, split):
         metric_dict = self.eval_metric.get_metric_dict()
+        f = open('./test.log', 'a')
+        print("%.4f"%metric_dict['Aver-Rank'], file=f)
+        f.close()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
@@ -152,6 +250,7 @@ class TwoTowerModel(pl.LightningModule):
             print(self.eval_metric)
             print()
         self.eval_metric.reset()
+        #exit()
         return metric_dict
 
     #def predict_step(self, batch, batch_idx, dataloader_idx):

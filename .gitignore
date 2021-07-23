@@ -133,6 +133,7 @@ dmypy.json
 .editorconfig
 .vscode/
 
+bert_models/
 dataset/*
 data/*
 output/*

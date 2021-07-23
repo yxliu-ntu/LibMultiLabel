@@ -19,6 +19,10 @@ class Bert2Tower(nn.Module):
         context_segments = torch.zeros_like(context_ids)
         question_attn_mask = self.__get_attn_mask(question_ids)
         context_attn_mask = self.__get_attn_mask(context_ids)
+        #print(question_segments.sum())
+        #print(context_segments.sum())
+        #print(question_attn_mask.sum())
+        #print(context_attn_mask.sum())
         model_out = self.bert(question_ids, question_segments, question_attn_mask,
                                 context_ids, context_segments, context_attn_mask)
         P, Q = model_out

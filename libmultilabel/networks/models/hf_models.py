@@ -10,7 +10,6 @@ def get_bert_biencoder_componets(config,  **kwargs):
         config.pretrained_model_cfg = ''
     if not hasattr(config, 'projection_dim'):
         config.projection_dim = 0
-    #config = PretrainedConfig.from_dict(config)
     bert_path = config.bert_path
     question_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
                                                     cfg_name=config.pretrained_model_cfg,
@@ -27,18 +26,26 @@ def get_bert_biencoder_componets(config,  **kwargs):
 
 class HFBertEncoder(BertModel):
     def __init__(self, config, project_dim: int = 0):
-        super().__init__(config)
+        #super().__init__(config)
+        BertModel.__init__(self, config)
         assert config.hidden_size > 0, 'Encoder hidden_size can\'t be zero'
         self.encode_proj = nn.Linear(config.hidden_size, project_dim) if project_dim != 0 else None
         self.init_weights()
 
     @classmethod
-    def init_encoder(cls, bert_path :str, cfg_name: str, projection_dim: int =0, dropout:float =0.1, **kwargs) -> BertModel:
+    def init_encoder(
+            cls,
+            bert_path :str,
+            cfg_name: str,
+            projection_dim: int =0,
+            dropout:float =0.1,
+            **kwargs
+            ) -> BertModel:
         cfg = BertConfig.from_pretrained(bert_path)
-        if dropout != 0:
+        if dropout >= 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-        return cls.from_pretrained(bert_path, config=cfg, **kwargs)
+        return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
     
     #def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
     def forward(self, input_ids, token_type_ids, attention_mask):
@@ -46,12 +53,9 @@ class HFBertEncoder(BertModel):
                 token_type_ids = token_type_ids,
                 attention_mask = attention_mask)
         if self.config.output_hidden_states:
-            sequence_output = res['last_hidden_state']
-            pooled_output = res['pooler_output']
-            hidden_states = res['hidden_states'] 
+            sequence_output, pooled_output, hidden_states = res
         else:
-            sequence_output = res['last_hidden_state']
-            pooled_output = res['pooler_output']
+            sequence_output, pooled_output = res
             hidden_states = None
         pooled_output = sequence_output[:,0,:]
         if self.encode_proj:
