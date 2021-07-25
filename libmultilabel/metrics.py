@@ -1,7 +1,6 @@
 import re
 
 import numpy as np
-from scipy.stats import rankdata
 from sklearn.metrics import multilabel_confusion_matrix
 
 from .utils import argsort_top_k
@@ -86,6 +85,7 @@ class MultiLabelMetrics():
     def get_metric_dict(self):
         """Get evaluation results."""
 
+        self.ranks = np.array(self.ranks)
         cm = self.multilabel_confusion_matrix
         cm_sum = cm.sum(axis=0)
         tp_sum, fp_sum, fn_sum = cm_sum[1,1], cm_sum[0,1], cm_sum[1,0]
@@ -108,7 +108,7 @@ class MultiLabelMetrics():
                 ## macro_f1 is less preferred but is used in some works. Please
                 ## refer to Opitz et al. 2019 [https://arxiv.org/pdf/1911.03347.pdf]
                 #'Another-Macro-F1': f1(macro_precision, macro_recall),
-                'Aver-Rank': sum(self.ranks)/len(self.ranks)/100.,
+                'Aver-Rank': self.ranks.mean()/100.,
         }
         for metric, val in self.metric_stats.items():
             result[metric] = val / self.n_eval

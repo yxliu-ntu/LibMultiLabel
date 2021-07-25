@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -108,14 +109,17 @@ class TwoTowerModel(pl.LightningModule):
             optimizer = optim.SGD(parameters, self.config.learning_rate,
                                   momentum=self.config.momentum,
                                   weight_decay=self.config.weight_decay)
+            torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adam':
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate)
+            torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adamw':
             optimizer = optim.AdamW(parameters,
                                     weight_decay=self.config.weight_decay,
                                     lr=self.config.learning_rate)
+            torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adamw-dpr':
             interval = 'step'
             optimizer = _get_dpr_optimizer(
@@ -131,7 +135,6 @@ class TwoTowerModel(pl.LightningModule):
         else:
             raise RuntimeError(
                 'Unsupported optimizer: {self.config.optimizer}')
-        #torch.nn.utils.clip_grad_value_(parameters, 0.5)
 
         if scheduler is None:
             return optimizer
@@ -144,27 +147,15 @@ class TwoTowerModel(pl.LightningModule):
                         }
                     }
 
-    def _dpr_step(self, batch):
+    def _dpr_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
-        #ys = torch.diag(batch['ys'])
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-        logits = ps @ qs.T # (m, m)
+        logits = ps @ qs.T
         loss = self.mnloss(logits, ys)
-        f = open('./train.log', 'a')
-        print('-'*10, file=f)
-        #for _i in range(batch['us'].shape[0]):
-        #    #print(batch['us'][_i, :], file=f)
-        #    print(ps[_i, :], file=f)
-        #for _i in range(batch['vs'].shape[0]):
-        #    #print(batch['vs'][_i, :], file=f)
-        #    print(qs[_i, :], file=f)
-        print(batch['us'].detach().sum().item(), batch['vs'].detach().sum().item(), file=f)
-        print(ps.detach().sum().item(), qs.detach().sum().item(), file=f)
-        print('loss:', loss.item(), file=f)
-        f.close()
-        return loss#, P, Q
+        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        return loss
 
-    def _sogram_step(self, batch):
+    def _sogram_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
@@ -174,9 +165,10 @@ class TwoTowerModel(pl.LightningModule):
         _abs = batch['_abs']
         _bbs = batch['_bbs']
         loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-        return loss#, ps, qs
+        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        return loss
 
-    def _minibatch_step(self, batch):
+    def _minibatch_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
         Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
@@ -184,17 +176,11 @@ class TwoTowerModel(pl.LightningModule):
         A = batch['A']
         B = batch['B']
         loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
-        return loss#, P, Q
+        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        return loss
 
     def training_step(self, batch, batch_idx):
-        #opt = self.optimizers()
-        #print(opt.param_groups[0]["lr"])
-        loss = self.step(batch)
-        #if batch_idx < 100:
-        #    print(batch_idx, loss.item()) 
-        #    #print(batch)
-        #else:
-        #    exit(0)
+        loss = self.step(batch, batch_idx)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -218,19 +204,12 @@ class TwoTowerModel(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
         pred_logits = P.detach() @ Q.detach().T
-        #f = open('./test.log', 'a')
-        #print('-.'*10, file=f)
-        #for _i in range(batch['U'].shape[0]):
-        #    print('>>>U<<<', batch['U'][_i, :], file=f)
-        #    print(','.join(['%.6f'%s for s in pred_logits.cpu().numpy()[_i,:]]), file=f)
-        #for _i in range(batch['V'].shape[0]):
-        #    print('>>>V<<<', batch['V'][_i, :], file=f)
-        #print(batch['U'].detach().sum().item(), batch['V'].detach().sum().item(), file=f)
-        #print(P.detach().sum().item(), Q.detach().sum().item(), file=f)
-        #f.close()
-        #return {'pred_scores': torch.sigmoid(pred_logits).cpu().numpy(),
-        return {'pred_scores': pred_logits.cpu().numpy(),
-                'target': batch['Y'].cpu().to_dense().numpy() if 'Y' in batch else batch['label'].detach().cpu().numpy()}
+        return {
+                'pred_scores': pred_logits.cpu().numpy(),
+                'target': batch['Y'].cpu().to_dense().numpy() \
+                        if 'Y' in batch \
+                        else batch['label'].detach().cpu().numpy()
+                }
 
     def _shared_eval_step_end(self, batch_parts):
         pred_scores = np.vstack(batch_parts['pred_scores'])
@@ -239,26 +218,13 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_epoch_end(self, step_outputs, split):
         metric_dict = self.eval_metric.get_metric_dict()
-        f = open('./test.log', 'a')
-        print("%.4f"%metric_dict['Aver-Rank'], file=f)
-        f.close()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
             print(self.eval_metric)
-            print()
+            print('')
+            logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
         self.eval_metric.reset()
-        #exit()
         return metric_dict
-
-    #def predict_step(self, batch, batch_idx, dataloader_idx):
-    #    outputs = self.network(batch['text'])
-    #    pred_scores= torch.sigmoid(outputs['logits']).detach().cpu().numpy()
-    #    k = self.config.save_k_predictions
-    #    top_k_idx = argsort_top_k(pred_scores, k, axis=1)
-    #    top_k_scores = np.take_along_axis(pred_scores, top_k_idx, axis=1)
-
-    #    return {'top_k_pred': top_k_idx,
-    #            'top_k_pred_scores': top_k_scores}

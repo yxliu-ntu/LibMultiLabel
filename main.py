@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import sys
 import yaml
 from datetime import datetime
 from pathlib import Path
@@ -192,35 +193,57 @@ def data_proc(x, max_seq_len):
     x = [101] + x + [102] + [0]*(max_seq_len-len(x)-3) + [102]
     return x
 
+
+def setup_loggers(log_path:str, is_silent: bool):
+    logging.basicConfig(
+            filename=log_path,
+            format="%(asctime)s [%(levelname)s]: %(message)s",
+            datefmt='%m-%d %H:%M',
+            level=logging.DEBUG,
+            force=True
+            )
+
+    log_formatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
+    log_level = logging.WARNING if is_silent else logging.INFO
+    console = logging.StreamHandler()
+    console.setFormatter(log_formatter)
+    console.setLevel(log_level)
+    logging.getLogger('').addHandler(console)
+
+    return
+
 def main():
     config = get_config()
-    log_level = logging.WARNING if config.silent else logging.INFO
-    logging.basicConfig(
-        level=log_level, format='%(asctime)s %(levelname)s:%(message)s')
     set_seed(seed=config.seed)
+
     config.device = init_device(use_cpu=config.cpu)
     config.pin_memory = 'cuda' in config.device.type
-    _Model = TwoTowerModel
-
     config.run_name = '{}_{}_{}'.format(
         config.data_name,
         Path(config.config).stem if config.config else config.model_name,
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
-    logging.info(f'Run name: {config.run_name}')
 
+    _Model = TwoTowerModel
     checkpoint_dir = os.path.join(config.result_dir, config.run_name)
-    checkpoint_callback = ModelCheckpoint(dirpath=checkpoint_dir,
-                                          filename='best_model',
-                                          save_last=True, save_top_k=1,
-                                          monitor=config.val_metric, mode='max')
-    earlystopping_callback = EarlyStopping(patience=config.patience,
-                                           monitor=config.val_metric, mode='max')
+    checkpoint_callback = ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename='best_model',
+            save_last=True, save_top_k=1,
+            monitor=config.val_metric, mode='max'
+            )
+    earlystopping_callback = EarlyStopping(
+            patience=config.patience,
+            monitor=config.val_metric, mode='max'
+            )
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
             partial(data_proc, max_seq_len=config.max_seq_len),
             partial(data_proc, max_seq_len=config.max_seq_len),
+            #lambda x: [int(i.split(':')[0]) for i in x.split(',')],
+            #lambda x: [int(i.split(':')[0]) for i in x.split(',')],
             data_utils.generate_batch_cross,
             data_utils.generate_batch_nonzero
             )
@@ -231,15 +254,20 @@ def main():
     assert valid_loader is not None
     config['total_steps'] = config.epochs * len(train_loader)
 
-    trainer = pl.Trainer(logger=False,
-                         num_sanity_val_steps=0,
-                         gpus=0 if config.cpu else 1,
-                         progress_bar_refresh_rate=0 if config.silent else 1,
-                         max_epochs=config.epochs,
-                         gradient_clip_val=config.gradient_clip_val,
-                         gradient_clip_algorithm=config.gradient_clip_algorithm,
-                         callbacks=[checkpoint_callback, earlystopping_callback])
+    trainer = pl.Trainer(
+            logger=False,
+            num_sanity_val_steps=0,
+            gpus=0 if config.cpu else 1,
+            progress_bar_refresh_rate=0 if config.silent else 1,
+            max_epochs=config.epochs,
+            gradient_clip_val=config.gradient_clip_val,
+            gradient_clip_algorithm=config.gradient_clip_algorithm,
+            callbacks=[checkpoint_callback, earlystopping_callback]
+            )
 
+    setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
+    logging.info(f'Run name: {config.run_name}')
+    logging.debug(f'Config as:\n{config}')
     if config.eval:
         model = _Model.load_from_checkpoint(config.checkpoint_path)
         model.config = config
@@ -248,18 +276,18 @@ def main():
             model = _Model.load_from_checkpoint(config.checkpoint_path)
             model.config = config
         else:
-            model = _Model(config)#, None, None)#, word_dict, classes)
+            model = _Model(config)
 
         trainer.fit(model, train_loader, valid_loader)
 
-        logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
-        model = _Model.load_from_checkpoint(checkpoint_callback.best_model_path)
 
     if test_loader is not None:
+        logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
+        model = _Model.load_from_checkpoint(checkpoint_callback.best_model_path)
         trainer.test(model, test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':
     wall_time = Timer()
     main()
-    print(f'Wall time: {wall_time.time():.2f} (s)')
+    logging.info(f'Wall time: {wall_time.time():.2f} (s)')
