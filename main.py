@@ -73,6 +73,8 @@ def get_config():
                         help='Number of epochs to train (default: %(default)s)')
     parser.add_argument('--warmup_steps', type=int, default=0.0,
                         help='Number of warm-up steps for training (default: %(default)s)')
+    parser.add_argument('--bratio', type=float, default=None,
+                        help='batch ratio of training samples for Sogram (default: %(default)s)')
     parser.add_argument('--bsize_i', type=int, default=16,
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
@@ -240,10 +242,10 @@ def main():
 
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
-            partial(data_proc, max_seq_len=config.max_seq_len),
-            partial(data_proc, max_seq_len=config.max_seq_len),
-            #lambda x: [int(i.split(':')[0]) for i in x.split(',')],
-            #lambda x: [int(i.split(':')[0]) for i in x.split(',')],
+            #partial(data_proc, max_seq_len=config.max_seq_len),
+            #partial(data_proc, max_seq_len=config.max_seq_len),
+            lambda x: [int(i.split(':')[0])+1 for i in x.split(',')], # idx 0 reserved for padding,
+            lambda x: [int(i.split(':')[0])+1 for i in x.split(',')],
             data_utils.generate_batch_cross,
             data_utils.generate_batch_nonzero
             )
@@ -253,6 +255,7 @@ def main():
     test_loader = dataloaders['test']
     assert valid_loader is not None
     config['total_steps'] = config.epochs * len(train_loader)
+    config['nnz'] = train_loader.dataset.nnz
 
     trainer = pl.Trainer(
             logger=False,

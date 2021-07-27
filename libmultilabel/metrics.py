@@ -2,6 +2,7 @@ import re
 
 import numpy as np
 from sklearn.metrics import multilabel_confusion_matrix
+from scipy.special import expit
 
 from .utils import argsort_top_k
 
@@ -66,7 +67,7 @@ class MultiLabelMetrics():
             y_true (ndarray): an array with ground truth labels (shape: batch_size * number of classes)
             y_pred (ndarray): an array with predicted label values (shape: batch_size * number of classes)
         """
-        y_pred_pos = y_pred > self.metric_threshold
+        y_pred_pos = expit(y_pred) > self.metric_threshold
 
         n_eval = len(y_true)
         self.n_eval += n_eval
@@ -79,13 +80,13 @@ class MultiLabelMetrics():
             self.metric_stats[metric] += (scores[metric] * n_eval)
 
         # Add averaged rank
-        _ranks = get_ranks(y_pred, y_true)
-        self.ranks.extend(_ranks)
+        if 'Aver-Rank' in self.monitor_metrics:
+            _ranks = get_ranks(y_pred, y_true)
+            self.ranks.extend(_ranks)
 
     def get_metric_dict(self):
         """Get evaluation results."""
 
-        self.ranks = np.array(self.ranks)
         cm = self.multilabel_confusion_matrix
         cm_sum = cm.sum(axis=0)
         tp_sum, fp_sum, fn_sum = cm_sum[1,1], cm_sum[0,1], cm_sum[1,0]
@@ -100,18 +101,22 @@ class MultiLabelMetrics():
         macro_recall = labelwise_recall.mean()
 
         result = {
-                #'Micro-Precision': micro_precision,
-                #'Micro-Recall': micro_recall,
+                'Micro-Precision': micro_precision,
+                'Micro-Recall': micro_recall,
                 #'Micro-F1': f1(micro_precision, micro_recall),
                 #'Macro-F1': f1(labelwise_precision, labelwise_recall).mean(),
                 ## The f1 value of macro_precision and macro_recall. This variant of
                 ## macro_f1 is less preferred but is used in some works. Please
                 ## refer to Opitz et al. 2019 [https://arxiv.org/pdf/1911.03347.pdf]
                 #'Another-Macro-F1': f1(macro_precision, macro_recall),
-                'Aver-Rank': self.ranks.mean()/100.,
+                #'Aver-Rank': self.ranks.mean()/100.,
         }
         for metric, val in self.metric_stats.items():
-            result[metric] = val / self.n_eval
+            if metric == 'Aver-Rank':
+                self.ranks = np.array(self.ranks)
+                result[metric] = self.ranks.mean()/100.
+            else:
+                result[metric] = val / self.n_eval
         return result
 
     def __repr__(self):

@@ -45,7 +45,7 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._minibatch_step
         elif self.config.loss == 'Sogram':
             self.mnloss = MNLoss.SogramMNLoss(self.config.k,
-                    self.config.k1, alpha=self.config.alpha, omega=self.config.omega)
+                    self.config.k1, alpha=self.config.alpha, omega=self.config.omega, nnz=self.config.nnz)
             self.step = self._sogram_step
         else:
             raise
@@ -110,6 +110,10 @@ class TwoTowerModel(pl.LightningModule):
                                   momentum=self.config.momentum,
                                   weight_decay=self.config.weight_decay)
             torch.nn.utils.clip_grad_value_(parameters, 0.5)
+        elif optimizer_name == 'adagrad':
+            optimizer = optim.Adagrad(self.network.parameters(),
+                                   weight_decay=self.config.weight_decay,
+                                   lr=self.config.learning_rate)
         elif optimizer_name == 'adam':
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
@@ -152,10 +156,12 @@ class TwoTowerModel(pl.LightningModule):
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = ps @ qs.T
         loss = self.mnloss(logits, ys)
-        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss:  {loss.item()}')
         return loss
 
     def _sogram_step(self, batch, batch_idx):
+        us = (batch['us'] - 1).cpu().numpy().flatten()
+        vs = (batch['vs'] - 1).cpu().numpy().flatten()
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
@@ -165,7 +171,9 @@ class TwoTowerModel(pl.LightningModule):
         _abs = batch['_abs']
         _bbs = batch['_bbs']
         loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        logging.debug(f'us: {us}, vs: {vs}')
+        logging.debug(f'ps: {ps.sum().item()}, qs: {qs.sum().item()}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss:  {loss.item()}')
         return loss
 
     def _minibatch_step(self, batch, batch_idx):
@@ -176,7 +184,7 @@ class TwoTowerModel(pl.LightningModule):
         A = batch['A']
         B = batch['B']
         loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
-        logging.debug(f'epoch: {self.current_epoch:d}, batch: {batch_idx:d}, loss:  {loss.item():.4g}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss:  {loss.item()}')
         return loss
 
     def training_step(self, batch, batch_idx):
