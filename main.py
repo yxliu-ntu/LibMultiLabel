@@ -225,6 +225,7 @@ def main():
         Path(config.config).stem if config.config else config.model_name,
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
+    config['is_sogram'] = config.loss == 'Sogram'
 
     _Model = TwoTowerModel
     checkpoint_dir = os.path.join(config.result_dir, config.run_name)
@@ -247,7 +248,7 @@ def main():
             lambda x: [int(i.split(':')[0])+1 for i in x.split(',')], # idx 0 reserved for padding,
             lambda x: [int(i.split(':')[0])+1 for i in x.split(',')],
             data_utils.generate_batch_cross,
-            data_utils.generate_batch_nonzero
+            data_utils.generate_batch_nonzero if not config['is_sogram'] else data_utils.generate_batch_sogram,
             )
     dataloaders = dataloader_factory.get_loaders()
     train_loader = dataloaders['train']

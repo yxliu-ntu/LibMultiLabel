@@ -24,6 +24,20 @@ def newtokenize(text, word_dict, max_seq_length):
     tokenizer = RegexpTokenizer(r'\w+')
     return [word_dict[t.lower()] for t in tokenizer.tokenize(text) if not t.isnumeric()][:max_seq_length]
 
+def generate_batch_sogram(data_batch):
+    data = data_batch[0]
+    us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['u']]
+    vs = [torch.LongTensor(v) for v in data['v']]
+    return {
+        'us': pad_sequence(us, batch_first=True),
+        'vs': pad_sequence(vs, batch_first=True),
+        '_as':  torch.FloatTensor(data['_a']),
+        '_bs':  torch.FloatTensor(data['_b']),
+        '_abs': torch.FloatTensor(data['_ab']),
+        '_bbs': torch.FloatTensor(data['_bb']),
+        'ys': torch.FloatTensor(data['y'].A1.ravel()),
+    }
+
 def generate_batch_nonzero(data_batch):
     us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
     vs = [torch.LongTensor(data['v']) for data in data_batch]

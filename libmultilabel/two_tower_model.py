@@ -113,7 +113,9 @@ class TwoTowerModel(pl.LightningModule):
         elif optimizer_name == 'adagrad':
             optimizer = optim.Adagrad(self.network.parameters(),
                                    weight_decay=self.config.weight_decay,
-                                   lr=self.config.learning_rate)
+                                   lr=self.config.learning_rate,
+                                   initial_accumulator_value=0.1,
+                                   eps=1e-7)
         elif optimizer_name == 'adam':
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
@@ -160,8 +162,8 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _sogram_step(self, batch, batch_idx):
-        us = (batch['us'] - 1).cpu().numpy().flatten()
-        vs = (batch['vs'] - 1).cpu().numpy().flatten()
+        #us = (batch['us'] - 1).cpu().numpy().flatten()
+        #vs = (batch['vs'] - 1).cpu().numpy().flatten()
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
@@ -171,8 +173,9 @@ class TwoTowerModel(pl.LightningModule):
         _abs = batch['_abs']
         _bbs = batch['_bbs']
         loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-        logging.debug(f'us: {us}, vs: {vs}')
-        logging.debug(f'ps: {ps.sum().item()}, qs: {qs.sum().item()}')
+        #logging.debug(f'us: {us}, vs: {vs}')
+        sogram_bsize = ps.size()[0]//2
+        logging.debug(f'ps: {ps[sogram_bsize:].sum().item()}, qs: {qs[sogram_bsize:].sum().item()}')
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss:  {loss.item()}')
         return loss
 
