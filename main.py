@@ -243,10 +243,10 @@ def main():
 
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
-            #partial(data_proc, max_seq_len=config.max_seq_len),
-            #partial(data_proc, max_seq_len=config.max_seq_len),
-            lambda x: [int(i.split(':')[0])+1 for i in x.split(',')], # idx 0 reserved for padding,
-            lambda x: [int(i.split(':')[0])+1 for i in x.split(',')],
+            partial(data_proc, max_seq_len=config.max_seq_len),
+            partial(data_proc, max_seq_len=config.max_seq_len),
+            #lambda x: [int(i.split(':')[0])+1 for i in x.split(',')], # idx 0 reserved for padding,
+            #lambda x: [int(i.split(':')[0])+1 for i in x.split(',')],
             data_utils.generate_batch_cross,
             data_utils.generate_batch_nonzero if not config['is_sogram'] else data_utils.generate_batch_sogram,
             )

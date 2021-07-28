@@ -112,11 +112,10 @@ class MultiLabelMetrics():
                 #'Aver-Rank': self.ranks.mean()/100.,
         }
         for metric, val in self.metric_stats.items():
-            if metric == 'Aver-Rank':
-                self.ranks = np.array(self.ranks)
-                result[metric] = self.ranks.mean()/100.
-            else:
-                result[metric] = val / self.n_eval
+            result[metric] = val / self.n_eval
+        if 'Aver-Rank' in self.monitor_metrics:
+            self.ranks = np.array(self.ranks)
+            result['Aver-Rank'] = self.ranks.mean()/100.
         return result
 
     def __repr__(self):
