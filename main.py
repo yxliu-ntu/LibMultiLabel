@@ -257,6 +257,8 @@ def main():
     assert valid_loader is not None
     config['total_steps'] = config.epochs * len(train_loader)
     config['nnz'] = train_loader.dataset.nnz
+    config['M'] = train_loader.dataset.M
+    config['N'] = train_loader.dataset.N
 
     trainer = pl.Trainer(
             logger=False,
