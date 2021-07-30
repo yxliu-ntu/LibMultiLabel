@@ -5,7 +5,7 @@ from torch import nn
 from .biencoder import BiEncoder
 
 def get_bert_biencoder_componets(config,  **kwargs):
-    dropout = config.dropout if hasattr(config, 'dropout') else 0.0
+    dropout = config.dropout if hasattr(config, 'dropout') else -1.0
     if not hasattr(config, 'pretrained_model_cfg'):
         config.pretrained_model_cfg = ''
     if not hasattr(config, 'projection_dim'):
