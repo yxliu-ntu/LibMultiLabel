@@ -51,7 +51,7 @@ class FM2Tower(torch.nn.Module):
          P: Float tensor of size ``(batch_size, k)``
          Q: Float tensor of size ``(action_num, k)``
      '''
-     P = self._cal_output(U, self.net_u).sum(dim=-2)
-     Q = self._cal_output(V, self.net_v).sum(dim=-2)
+     P = self._cal_output(U, self.net_u).sum(dim=-2) if U is not None else None
+     Q = self._cal_output(V, self.net_v).sum(dim=-2) if V is not None else None
      return P, Q
 

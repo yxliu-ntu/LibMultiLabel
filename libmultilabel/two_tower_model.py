@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+import math
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
@@ -17,7 +18,7 @@ from .utils import dump_log, argsort_top_k
 
 class TwoTowerModel(pl.LightningModule):
     """Concrete class handling Pytorch Lightning training flow"""
-    def __init__(self, config, *args, **kwargs):
+    def __init__(self, config, Y_eval, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
 
@@ -25,7 +26,8 @@ class TwoTowerModel(pl.LightningModule):
             config = vars(config)
         if isinstance(config, dict):
             config = AttributeDict(config)
-        self.config = config
+        self.config = self.hparams.config
+        self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
         self.network = getattr(networks, self.config.model_name)(self.config)
 
@@ -33,13 +35,6 @@ class TwoTowerModel(pl.LightningModule):
         if self.config.loss == 'DPR':
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_step
-        #elif self.config.loss == 'Naive-LRLR':
-        #    self.step = self._minibatch_step
-        #    self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega,
-        #            loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
-        #elif self.config.loss == 'Naive-LRSQ':
-        #    self.step = self._minibatch_step
-        #    self.mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
         elif self.config.loss == 'Minibatch':
             self.mnloss = MNLoss.MinibatchMNLoss(
                     omega=self.config.omega,
@@ -226,20 +221,33 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
-        pred_logits = P.detach() @ Q.detach().T
         return {
-                'pred_scores': pred_logits.cpu().numpy(),
-                'target': batch['Y'].cpu().to_dense().numpy() \
-                        if 'Y' in batch \
-                        else batch['label'].detach().cpu().numpy()
+                'P': P.detach().cpu().numpy() if P is not None else None, 
+                'Q': Q.detach().cpu().numpy() if Q is not None else None,
                 }
 
     def _shared_eval_step_end(self, batch_parts):
-        pred_scores = np.vstack(batch_parts['pred_scores'])
-        target = np.vstack(batch_parts['target'])
-        return self.eval_metric.update(target, pred_scores)
+        P = batch_parts['P'] if batch_parts['P'] is not None else None
+        Q = batch_parts['Q'] if batch_parts['Q'] is not None else None
+        return P, Q
 
     def _shared_eval_epoch_end(self, step_outputs, split):
+        P, Q = zip(*step_outputs)
+        P = np.vstack([_data for _data in P if _data is not None])
+        Q = np.vstack([_data for _data in Q if _data is not None])
+        m, n = P.shape[0], Q.shape[0]
+        bsize_i = self.config.eval_bsize_i
+        bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n
+        segment_m = math.ceil(m/bsize_i)
+        segment_n = math.ceil(n/bsize_j)
+        for i in range(segment_m):
+            i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
+            score_mat = np.zeros((i_end-i_start, n))
+            target = self.Y_eval[i_start:i_end].todense()
+            for j in range(segment_n):
+                j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
+                score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
+            self.eval_metric.update(target, score_mat)
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)

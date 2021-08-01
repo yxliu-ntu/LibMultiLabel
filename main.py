@@ -129,6 +129,8 @@ def get_config():
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,
                         help='Size of evaluating batches (default: %(default)s)')
+    parser.add_argument('--eval_bsize_j', type=int, default=None,
+                        help='Size of evaluating batches (default: %(default)s)')
     parser.add_argument('--metrics_threshold', type=float, default=0.5,
                         help='Thresholds to monitor for metrics (default: %(default)s)')
     parser.add_argument('--monitor_metrics', nargs='+', default=['P@1', 'P@3', 'P@5'],
@@ -275,21 +277,34 @@ def main():
     logging.info(f'Run name: {config.run_name}')
     logging.debug(f'Config as:\n{config}')
     if config.eval:
-        model = _Model.load_from_checkpoint(config.checkpoint_path)
-        model.config = config
+        model = _Model.load_from_checkpoint(
+                config.checkpoint_path,
+                config=config,
+                Y_eval=test_loader.dataset.Yu,
+                )
     else:
         if config.checkpoint_path:
-            model = _Model.load_from_checkpoint(config.checkpoint_path)
-            model.config = config
+            model = _Model.load_from_checkpoint(
+                    config.checkpoint_path,
+                    config=config,
+                    Y_eval=valid_loader.dataset.Yu,
+                    )
         else:
-            model = _Model(config)
+            model = _Model(
+                    config=config,
+                    Y_eval=valid_loader.dataset.Yu,
+                    )
 
         trainer.fit(model, train_loader, valid_loader)
 
 
     if test_loader is not None:
         logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
-        model = _Model.load_from_checkpoint(checkpoint_callback.best_model_path)
+        model = _Model.load_from_checkpoint(
+                checkpoint_callback.best_model_path,
+                config=config,
+                Y_eval=test_loader.dataset.Yu,
+                )
         trainer.test(model, test_dataloaders=test_loader)
 
 

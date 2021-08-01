@@ -15,10 +15,10 @@ class Bert2Tower(nn.Module):
         self.bert = get_bert_biencoder_componets(config)
 
     def forward(self, question_ids:T, context_ids:T):
-        question_segments = torch.zeros_like(question_ids)
-        context_segments = torch.zeros_like(context_ids)
-        question_attn_mask = self.__get_attn_mask(question_ids)
-        context_attn_mask = self.__get_attn_mask(context_ids)
+        question_segments = torch.zeros_like(question_ids) if question_ids is not None else None
+        context_segments = torch.zeros_like(context_ids)   if context_ids is not None else None
+        question_attn_mask = self.__get_attn_mask(question_ids) if question_ids is not None else None
+        context_attn_mask = self.__get_attn_mask(context_ids) if context_ids is not None else None
         model_out = self.bert(question_ids, question_segments, question_attn_mask,
                                 context_ids, context_segments, context_attn_mask)
         P, Q = model_out

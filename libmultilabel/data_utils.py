@@ -53,16 +53,22 @@ def generate_batch_nonzero(data_batch):
 
 def generate_batch_cross(data_batch):
     data = data_batch[0]
-    us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
-    vs = [torch.LongTensor(v) for v in data['vs']]
+    if data['us'] is not None:
+        us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
+    else:
+        us = None
+    if data['vs'] is not None:
+        vs = [torch.LongTensor(v) for v in data['vs']]
+    else:
+        vs = None
     return {
-        'U': pad_sequence(us, batch_first=True),
-        'V': pad_sequence(vs, batch_first=True),
-        'A':  torch.FloatTensor(data['_as']),
-        'B':  torch.FloatTensor(data['_bs']),
-        'Ab': torch.FloatTensor(data['_abs']),
-        'Bb': torch.FloatTensor(data['_bbs']),
-        'Y': _spmtx2tensor(data['ys']),
+        'U': pad_sequence(us, batch_first=True) if us is not None else None,
+        'V': pad_sequence(vs, batch_first=True) if vs is not None else None,
+        'A':  torch.FloatTensor(data['_as']) if us is not None else None,
+        'B':  torch.FloatTensor(data['_bs']) if vs is not None else None,
+        'Ab': torch.FloatTensor(data['_abs']) if us is not None else None,
+        'Bb': torch.FloatTensor(data['_bbs']) if vs is not None else None,
+        'Y': _spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
     }
 
 def _spmtx2tensor(spmtx):
