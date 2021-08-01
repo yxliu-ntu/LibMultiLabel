@@ -59,8 +59,8 @@ def get_config():
     #                    help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
     #parser.add_argument('--min_vocab_freq', type=int, default=1,
     #                    help='The minimum frequency needed to include a token in the vocabulary (default: %(default)s)')
-    #parser.add_argument('--max_seq_length', type=int, default=500,
-    #                    help='The maximum number of tokens of a sample (default: %(default)s)')
+    parser.add_argument('--max_seq_len', type=int, default=256,
+                        help='The maximum number of tokens of a sample (default: %(default)s)')
     parser.add_argument('--shuffle', type=bool, default=True,
                         help='Whether to shuffle training data before each epoch (default: %(default)s)')
     parser.add_argument('--drop_last', type=bool, default=False,
@@ -79,7 +79,7 @@ def get_config():
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
-    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adamw-dpr'],
+    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adamw-dpr', 'adagrad'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
                         help='Learning rate for optimizer (default: %(default)s)')
@@ -153,18 +153,16 @@ def get_config():
     #                    help='Path to the an output file holding top 100 label results (default: %(default)s)')
 
     # others
-    parser.add_argument('--max_seq_len', type=int, default=256,
-                        help='max sequence lenght')
-    parser.add_argument('--loaderFactory', action='store_true',
-                        help='Use dataloaderFactory')
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
     parser.add_argument('--silent', action='store_true',
                         help='Enable silent mode')
+    parser.add_argument('--eval_sqrt_mode', action='store_true',
+                        help='evaluate model every sqrt(len(dataloader)) steps')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Use multi-cpu core for data pre-processing (default: %(default)s)')
-    parser.add_argument('--embed_cache_dir', type=str,
-                        help='For parameter search only: path to a directory for storing embeddings for multiple runs. (default: %(default)s)')
+    #parser.add_argument('--embed_cache_dir', type=str,
+    #                    help='For parameter search only: path to a directory for storing embeddings for multiple runs. (default: %(default)s)')
     parser.add_argument('--eval', action='store_true',
                         help='Only run evaluation on the test set (default: %(default)s)')
     parser.add_argument('--checkpoint_path',
@@ -262,6 +260,10 @@ def main():
     config['M'] = train_loader.dataset.M
     config['N'] = train_loader.dataset.N
 
+    if config.loss == 'Sogram' and config.eval_sqrt_mode:
+        val_check_interval = int(np.sqrt(len(train_loader)))
+    else:
+        val_check_interval = 1.0
     trainer = pl.Trainer(
             logger=False,
             num_sanity_val_steps=0,
@@ -270,7 +272,8 @@ def main():
             max_epochs=config.epochs,
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,
-            callbacks=[checkpoint_callback, earlystopping_callback]
+            callbacks=[checkpoint_callback, earlystopping_callback],
+            val_check_interval=val_check_interval,
             )
 
     setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
