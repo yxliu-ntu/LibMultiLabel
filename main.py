@@ -93,7 +93,7 @@ def get_config():
                         help='value for clipping gradient, 0 means don’t clip')
     parser.add_argument('--gradient_clip_algorithm', type=str, choices=['norm', 'value'], default='norm',
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
-    parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'DPR'], default='DPR',
+    parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'DPR-LRLR', 'DPR'], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')
@@ -232,12 +232,15 @@ def main():
     checkpoint_callback = ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename='best_model',
-            save_last=True, save_top_k=1,
-            monitor=config.val_metric, mode='max'
+            save_last=True,
+            save_top_k=1,
+            monitor=config.val_metric,
+            mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
     earlystopping_callback = EarlyStopping(
             patience=config.patience,
-            monitor=config.val_metric, mode='max'
+            monitor=config.val_metric,
+            mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -262,19 +265,30 @@ def main():
 
     if config.loss == 'Sogram' and config.eval_sqrt_mode:
         val_check_interval = int(np.sqrt(len(train_loader)))
+        trainer = pl.Trainer(
+                logger=False,
+                num_sanity_val_steps=0,
+                gpus=0 if config.cpu else 1,
+                progress_bar_refresh_rate=0 if config.silent else 1,
+                max_steps=val_check_interval*100,
+                gradient_clip_val=config.gradient_clip_val,
+                gradient_clip_algorithm=config.gradient_clip_algorithm,
+                callbacks=[checkpoint_callback, earlystopping_callback],
+                val_check_interval=val_check_interval,
+                )
     else:
         val_check_interval = 1.0
-    trainer = pl.Trainer(
-            logger=False,
-            num_sanity_val_steps=0,
-            gpus=0 if config.cpu else 1,
-            progress_bar_refresh_rate=0 if config.silent else 1,
-            max_epochs=config.epochs,
-            gradient_clip_val=config.gradient_clip_val,
-            gradient_clip_algorithm=config.gradient_clip_algorithm,
-            callbacks=[checkpoint_callback, earlystopping_callback],
-            val_check_interval=val_check_interval,
-            )
+        trainer = pl.Trainer(
+                logger=False,
+                num_sanity_val_steps=0,
+                gpus=0 if config.cpu else 1,
+                progress_bar_refresh_rate=0 if config.silent else 1,
+                max_epochs=config.epochs,
+                gradient_clip_val=config.gradient_clip_val,
+                gradient_clip_algorithm=config.gradient_clip_algorithm,
+                callbacks=[checkpoint_callback, earlystopping_callback],
+                val_check_interval=val_check_interval,
+                )
 
     setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
     logging.info(f'Run name: {config.run_name}')

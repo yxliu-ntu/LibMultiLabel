@@ -13,7 +13,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
-from .utils import dump_log, argsort_top_k
+from .utils import dump_log, argsort_top_k, dense_to_sparse
 
 
 class TwoTowerModel(pl.LightningModule):
@@ -35,6 +35,12 @@ class TwoTowerModel(pl.LightningModule):
         if self.config.loss == 'DPR':
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_step
+        elif self.config.loss == 'DPR-LRLR':
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
+                    )
+            self.step = self._dpr_lrlr_step
         elif self.config.loss == 'Minibatch':
             self.mnloss = MNLoss.MinibatchMNLoss(
                     omega=self.config.omega,
@@ -161,6 +167,17 @@ class TwoTowerModel(pl.LightningModule):
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = ps @ qs.T
         loss = self.mnloss(logits, ys)
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
+    def _dpr_lrlr_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = dense_to_sparse(torch.diag(batch['ys']))
+        _as = batch['_as']
+        _bs = batch['_bs']
+        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 

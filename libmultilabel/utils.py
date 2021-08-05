@@ -99,3 +99,9 @@ def argsort_top_k(vals, k, axis=-1):
     sorted_order = np.argsort(-unsorted_top_k_scores, axis=axis)
     sorted_top_k_idx = np.take_along_axis(unsorted_top_k_idx, sorted_order, axis=axis)
     return sorted_top_k_idx
+
+def dense_to_sparse(dense: torch.Tensor):
+    indices = torch.nonzero(dense).t()
+    values = dense[indices[0], indices[1]] # modify this based on dimensionality
+    return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
+
