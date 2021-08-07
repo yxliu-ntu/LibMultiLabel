@@ -9,7 +9,7 @@ train_cmd="python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
 
 # Print out all parameter pair
-for br in 16 64 256 1024
+for br in 16 64 256 #1024
 do
     for lr in 2e-5
     do
@@ -30,4 +30,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+#task | xargs -0 -d '\n' -P 1 -I {} sh -c {}

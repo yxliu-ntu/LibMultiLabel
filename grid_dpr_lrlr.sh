@@ -9,7 +9,7 @@ train_cmd="python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
 
 # Print out all parameter pair
-for br in 16 #64 256 1024
+for br in 16 64 256 #1024
 do
     for lr in 2e-5
     do

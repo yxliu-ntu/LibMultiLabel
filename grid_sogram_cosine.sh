@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # basic seting
-config='example_config/curatedtrec/bert_tiny_2tower_sogram.yml'
+config='example_config/curatedtrec/bert_tiny_2tower_sogram_cosine.yml'
 
 task(){
 # Set up train command
@@ -18,7 +18,7 @@ do
         do
             for omega in 0.00390625 0.0009765625 0.000244140625 0.00006103515625 1.0 0.25 0.0625 0.015625
             do
-                for r in -1.0 -4.0 -16.0 -64.0
+                for r in 0 -0.5 -1.0
                 do
                     cmd="${train_cmd} --learning_rate ${lr}"
                     #cmd="${cmd} --bratio ${br}"
@@ -39,4 +39,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+#task | xargs -0 -d '\n' -P 1 -I {} sh -c {}

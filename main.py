@@ -12,6 +12,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities.parsing import AttributeDict
+from pytorch_lightning import loggers as pl_loggers
 
 from libmultilabel import data_utils, MNLoss
 from libmultilabel.model import Model
@@ -37,6 +38,8 @@ def get_config():
                         help='The directory to load data (default: %(default)s)')
     parser.add_argument('--result_dir', default='./runs',
                         help='The directory to save checkpoints and logs (default: %(default)s)')
+    parser.add_argument('--tfboard_log_dir', default='./tfboard_logs',
+                        help='The directory to save tensorboard logs (default: %(default)s)')
 
     # data
     parser.add_argument('--data_name', default='rcv1',
@@ -93,7 +96,7 @@ def get_config():
                         help='value for clipping gradient, 0 means don’t clip')
     parser.add_argument('--gradient_clip_algorithm', type=str, choices=['norm', 'value'], default='norm',
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
-    parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'DPR-LRLR', 'DPR'], default='DPR',
+    parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'Sogram-Cosine', 'Sogram-Scale', 'DPR-LRLR', 'DPR'], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')
@@ -157,8 +160,8 @@ def get_config():
                         help='Disable CUDA')
     parser.add_argument('--silent', action='store_true',
                         help='Enable silent mode')
-    parser.add_argument('--eval_sqrt_mode', action='store_true',
-                        help='evaluate model every sqrt(len(dataloader)) steps')
+    #parser.add_argument('--eval_sqrt_mode', action='store_true',
+    #                    help='evaluate model every sqrt(len(dataloader)) steps')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Use multi-cpu core for data pre-processing (default: %(default)s)')
     #parser.add_argument('--embed_cache_dir', type=str,
@@ -225,7 +228,7 @@ def main():
         Path(config.config).stem if config.config else config.model_name,
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
-    config['is_sogram'] = config.loss == 'Sogram'
+    config['is_sogram'] = 'Sogram' in config.loss
 
     _Model = TwoTowerModel
     checkpoint_dir = os.path.join(config.result_dir, config.run_name)
@@ -237,11 +240,12 @@ def main():
             monitor=config.val_metric,
             mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
-    earlystopping_callback = EarlyStopping(
-            patience=config.patience,
-            monitor=config.val_metric,
-            mode='max' if config.val_metric != 'Aver-Rank' else 'min',
-            )
+    #earlystopping_callback = EarlyStopping(
+    #        patience=config.patience,
+    #        monitor=config.val_metric,
+    #        mode='max' if config.val_metric != 'Aver-Rank' else 'min',
+    #        )
+    #tb_logger = pl_loggers.TensorBoardLogger(config.tfboard_log_dir, name=config.run_name)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     dataloader_factory = MNLoss.DataloaderFactory(
@@ -258,37 +262,28 @@ def main():
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
     assert valid_loader is not None
-    config['total_steps'] = config.epochs * len(train_loader)
     config['nnz'] = train_loader.dataset.nnz
     config['M'] = train_loader.dataset.M
     config['N'] = train_loader.dataset.N
 
-    if config.loss == 'Sogram' and config.eval_sqrt_mode:
+    if 'Sogram' in config.loss:
         val_check_interval = int(np.sqrt(len(train_loader)))
-        trainer = pl.Trainer(
-                logger=False,
-                num_sanity_val_steps=0,
-                gpus=0 if config.cpu else 1,
-                progress_bar_refresh_rate=0 if config.silent else 1,
-                max_steps=val_check_interval*100,
-                gradient_clip_val=config.gradient_clip_val,
-                gradient_clip_algorithm=config.gradient_clip_algorithm,
-                callbacks=[checkpoint_callback, earlystopping_callback],
-                val_check_interval=val_check_interval,
-                )
+        config['total_steps'] = config.epochs * len(train_loader)
     else:
-        val_check_interval = 1.0
-        trainer = pl.Trainer(
-                logger=False,
-                num_sanity_val_steps=0,
-                gpus=0 if config.cpu else 1,
-                progress_bar_refresh_rate=0 if config.silent else 1,
-                max_epochs=config.epochs,
-                gradient_clip_val=config.gradient_clip_val,
-                gradient_clip_algorithm=config.gradient_clip_algorithm,
-                callbacks=[checkpoint_callback, earlystopping_callback],
-                val_check_interval=val_check_interval,
-                )
+        val_check_interval = len(train_loader)
+        config['total_steps'] = config.epochs * (val_check_interval**2)
+    trainer = pl.Trainer(
+            logger=False,
+            #logger=tb_logger,
+            num_sanity_val_steps=0,
+            gpus=0 if config.cpu else 1,
+            progress_bar_refresh_rate=0 if config.silent else 1,
+            max_steps=config.total_steps,
+            gradient_clip_val=config.gradient_clip_val,
+            gradient_clip_algorithm=config.gradient_clip_algorithm,
+            callbacks=[checkpoint_callback,], #earlystopping_callback],
+            val_check_interval=val_check_interval,
+            )
 
     setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
     logging.info(f'Run name: {config.run_name}')

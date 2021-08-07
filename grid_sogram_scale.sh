@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # basic seting
-config='example_config/curatedtrec/bert_tiny_2tower_sogram.yml'
+config='example_config/curatedtrec/bert_tiny_2tower_sogram_scale.yml'
 
 task(){
 # Set up train command
@@ -39,4 +39,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+#task | xargs -0 -d '\n' -P 1 -I {} sh -c {}

@@ -1,3 +1,4 @@
+import os
 import logging
 import numpy as np
 import math
@@ -8,6 +9,7 @@ import torch.optim as optim
 from abc import abstractmethod
 from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
+from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities.parsing import AttributeDict
 
 from . import networks
@@ -30,6 +32,7 @@ class TwoTowerModel(pl.LightningModule):
         self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
         self.network = getattr(networks, self.config.model_name)(self.config)
+        self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
         # init loss
         if self.config.loss == 'DPR':
@@ -57,8 +60,39 @@ class TwoTowerModel(pl.LightningModule):
                     nnz=self.config.nnz
                     )
             self.step = self._sogram_step
+        elif self.config.loss == 'Sogram-Scale':
+            self.mnloss = MNLoss.SogramMNLoss(
+                    self.config.k,
+                    self.config.k1,
+                    alpha=self.config.alpha,
+                    omega=self.config.omega,
+                    nnz=self.config.nnz
+                    )
+            self.step = self._sogram_scale_step
+        elif self.config.loss == 'Sogram-Cosine':
+            self.mnloss = MNLoss.SogramMNLoss(
+                    self.config.k,
+                    self.config.k1,
+                    alpha=self.config.alpha,
+                    omega=self.config.omega,
+                    nnz=self.config.nnz,
+                    loss_func=torch.nn.functional.mse_loss
+                    )
+            self.step = self._sogram_cosine_step
         else:
             raise
+
+    def _tb_log(self, ps, qs):
+        self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
+        self.tbwriter.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
+        #self.logger.experiment.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
+        #self.logger.experiment.add_scalar("ps_max",  ps.norm(dim=1).max(),  self.global_step)
+        #self.logger.experiment.add_scalar("ps_min",  ps.norm(dim=1).min(),  self.global_step)
+        #self.logger.experiment.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
+        #self.logger.experiment.add_scalar("qs_max",  qs.norm(dim=1).max(),  self.global_step)
+        #self.logger.experiment.add_scalar("qs_min",  qs.norm(dim=1).min(),  self.global_step)
+
+        return
 
     def configure_optimizers(self):
         """
@@ -102,6 +136,7 @@ class TwoTowerModel(pl.LightningModule):
             linearly increasing during a warmup period.
             """
             def _lr_lambda(current_step):
+                logging.debug(f'current_step:{current_step}')
                 current_step += steps_shift
                 if current_step < warmup_steps:
                     return float(current_step) / float(max(1, warmup_steps))
@@ -163,11 +198,16 @@ class TwoTowerModel(pl.LightningModule):
                     }
 
     def _dpr_step(self, batch, batch_idx):
+        #us = (batch['us']).cpu().numpy().flatten()
+        #vs = (batch['vs']).cpu().numpy().flatten()
         ps, qs = self.network(batch['us'], batch['vs'])
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = ps @ qs.T
         loss = self.mnloss(logits, ys)
+        #logging.debug(f'us: {us}, vs: {vs}')
+        #logging.debug(f'ps:{ps.sum().item()}, qs:{qs.sum().item()}')
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
         return loss
 
     def _dpr_lrlr_step(self, batch, batch_idx):
@@ -179,10 +219,11 @@ class TwoTowerModel(pl.LightningModule):
         _bs = batch['_bs']
         loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
         return loss
 
     def _sogram_step(self, batch, batch_idx):
-        #us = (batch['us'] - 1).cpu().numpy().flatten()
+        #us = (batch['us'] - 1).cpu().numpy().flatten() # -1 for ml1m only
         #vs = (batch['vs'] - 1).cpu().numpy().flatten()
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
@@ -196,6 +237,46 @@ class TwoTowerModel(pl.LightningModule):
         #logging.debug(f'us: {us}, vs: {vs}')
         #sogram_bsize = ps.size()[0]//2
         #logging.debug(f'ps: {ps[sogram_bsize:].sum().item()}, qs: {qs[sogram_bsize:].sum().item()}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _sogram_scale_step(self, batch, batch_idx):
+        def _embedding_scale(x, scaler=8.0):
+            x = x/scaler
+            return x
+        ps, qs = self.network(batch['us'], batch['vs'])
+        self._tb_log(ps.detach(), qs.detach())
+        ps = _embedding_scale(ps)
+        qs = _embedding_scale(qs)
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = batch['ys']
+        _as = batch['_as']
+        _bs = batch['_bs']
+        _abs = batch['_abs']
+        _bbs = batch['_bbs']
+        loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
+    def _sogram_cosine_step(self, batch, batch_idx):
+        def _embedding_norm(x):
+            x_norm = torch.norm(x, dim=1, keepdim=True).detach()
+            x = x/x_norm
+            return x
+        ps, qs = self.network(batch['us'], batch['vs'])
+        self._tb_log(ps.detach(), qs.detach())
+        ps = _embedding_norm(ps)
+        qs = _embedding_norm(qs)
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = batch['ys']
+        _as = batch['_as']
+        _bs = batch['_bs']
+        _abs = batch['_abs']
+        _bbs = batch['_bbs']
+        loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
@@ -212,6 +293,7 @@ class TwoTowerModel(pl.LightningModule):
         #logging.debug(f'us: {us}, vs: {vs}')
         #logging.debug(f'ps: {P.sum().item()}, qs: {Q.sum().item()}')
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(P.detach(), Q.detach())
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -275,4 +357,5 @@ class TwoTowerModel(pl.LightningModule):
             print('')
             logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
         self.eval_metric.reset()
+        #exit()
         return metric_dict

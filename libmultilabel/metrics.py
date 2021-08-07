@@ -1,4 +1,5 @@
 import re
+import logging
 
 import numpy as np
 from sklearn.metrics import multilabel_confusion_matrix
@@ -29,6 +30,7 @@ def get_ranks(y_pred, y_true):
     for i, idx in enumerate(positive_idx_per_question):
         # aggregate the rank of the known gold passage in the sorted results for each question
         gold_idx = (indices[i, :] == idx).ravel().nonzero()[-1][0]
+        #logging.debug(f'gt:{idx}, rank:{gold_idx}, len:{indices[i, :].shape[-1]}')
         ranks.append(gold_idx + 1)
     return ranks
 
