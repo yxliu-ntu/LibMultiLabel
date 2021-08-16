@@ -36,15 +36,25 @@ class TwoTowerModel(pl.LightningModule):
 
         # init loss
         if self.config.loss == 'DPR':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_step
         elif self.config.loss == 'DPR-LRLR':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
                     )
-            self.step = self._dpr_lrlr_step
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-LRSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_minus=torch.nn.functional.mse_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'Minibatch':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.MinibatchMNLoss(
                     omega=self.config.omega,
                     M=self.config.M,
@@ -52,6 +62,7 @@ class TwoTowerModel(pl.LightningModule):
                     )
             self.step = self._minibatch_step
         elif self.config.loss == 'Sogram':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.SogramMNLoss(
                     self.config.k,
                     self.config.k1,
@@ -61,6 +72,7 @@ class TwoTowerModel(pl.LightningModule):
                     )
             self.step = self._sogram_step
         elif self.config.loss == 'Sogram-Scale':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.SogramMNLoss(
                     self.config.k,
                     self.config.k1,
@@ -70,6 +82,7 @@ class TwoTowerModel(pl.LightningModule):
                     )
             self.step = self._sogram_scale_step
         elif self.config.loss == 'Sogram-Cosine':
+            logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.SogramMNLoss(
                     self.config.k,
                     self.config.k1,
@@ -210,7 +223,7 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         return loss
 
-    def _dpr_lrlr_step(self, batch, batch_idx):
+    def _dpr_lrlrsq_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)

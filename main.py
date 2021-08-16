@@ -240,11 +240,11 @@ def main():
             monitor=config.val_metric,
             mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
-    #earlystopping_callback = EarlyStopping(
-    #        patience=config.patience,
-    #        monitor=config.val_metric,
-    #        mode='max' if config.val_metric != 'Aver-Rank' else 'min',
-    #        )
+    earlystopping_callback = EarlyStopping(
+            patience=config.patience,
+            monitor=config.val_metric,
+            mode='max' if config.val_metric != 'Aver-Rank' else 'min',
+            )
     #tb_logger = pl_loggers.TensorBoardLogger(config.tfboard_log_dir, name=config.run_name)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -281,7 +281,7 @@ def main():
             max_steps=config.total_steps,
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,
-            callbacks=[checkpoint_callback,], #earlystopping_callback],
+            callbacks=[checkpoint_callback, earlystopping_callback],
             val_check_interval=val_check_interval,
             )
 
