@@ -6,8 +6,8 @@ trainL_path: data/nq.subsampled_no-extra-neg/trainL.csv
 trainR_path: data/nq.subsampled_no-extra-neg/trainR.csv
 validL_path: data/nq.subsampled_no-extra-neg/valL.csv
 validR_path: data/nq.subsampled_no-extra-neg/valR.csv
-validL_path: data/nq.subsampled_no-extra-neg/testL.csv
-validR_path: data/nq.subsampled_no-extra-neg/testR.csv
+testL_path: data/nq.subsampled_no-extra-neg/testL.csv
+testR_path: data/nq.subsampled_no-extra-neg/testR.csv
 max_seq_len: 256
 
 # train
