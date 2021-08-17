@@ -13,7 +13,7 @@ shuffle: True
 seed: 1337
 epochs: 30 #00
 optimizer: adamw-dpr
-#patience: 1e7
+patience: 100
 pad_id: 0
 warmup_steps: 1237
 gradient_clip_val: 2.0

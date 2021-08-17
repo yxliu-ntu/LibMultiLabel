@@ -52,7 +52,7 @@ class MultiLabelMetrics():
                 self.top_ks.add(top_k)
                 self.metric_stats[metric] = 0.
                 self.prec_recall_metrics.append(metric)
-            elif metric not in ['Micro-Precision', 'Micro-Recall', 'Micro-F1', 'Macro-F1', 'Another-Macro-F1', 'Aver-Rank']:
+            elif metric not in ['Micro-Precision', 'Micro-Recall', 'Micro-F1', 'Macro-F1', 'Another-Macro-F1', 'Aver-Rank', 'MRR@10']:
                 raise ValueError(f'Invalid metric: {metric}')
 
     def reset(self):
@@ -82,13 +82,14 @@ class MultiLabelMetrics():
             self.metric_stats[metric] += (scores[metric] * n_eval)
 
         # Add averaged rank
-        if 'Aver-Rank' in self.monitor_metrics:
+        if 'Aver-Rank' in self.monitor_metrics or 'MRR@10' in self.monitor_metrics:
             _ranks = get_ranks(y_pred, y_true)
             self.ranks.extend(_ranks)
 
     def get_metric_dict(self):
         """Get evaluation results."""
 
+        self.ranks = np.array(self.ranks)
         cm = self.multilabel_confusion_matrix
         cm_sum = cm.sum(axis=0)
         tp_sum, fp_sum, fn_sum = cm_sum[1,1], cm_sum[0,1], cm_sum[1,0]
@@ -116,8 +117,10 @@ class MultiLabelMetrics():
         for metric, val in self.metric_stats.items():
             result[metric] = val / self.n_eval
         if 'Aver-Rank' in self.monitor_metrics:
-            self.ranks = np.array(self.ranks)
             result['Aver-Rank'] = self.ranks.mean()/100.
+        if 'MRR@10' in self.monitor_metrics:
+            inv_ranks = np.array([1/r if r <= 10 else 0.0 for r in self.ranks])
+            result['MRR@10'] = inv_ranks.mean()/100.
         return result
 
     def __repr__(self):

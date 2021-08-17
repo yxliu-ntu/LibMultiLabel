@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # basic seting
-config='example_config/curatedtrec/bert_tiny_2tower_dpr_lrsq.yml'
+config=$1
 
 task(){
 # Set up train command
@@ -10,7 +10,7 @@ train_cmd="${train_cmd} --config ${config}"
 wd=0.0
 
 # Print out all parameter pair
-for br in 16 64 256 #1024
+for br in 64 #16 64 256 #1024
 do
     for lr in 2e-5
     do
