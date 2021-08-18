@@ -11,6 +11,7 @@ from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities.parsing import AttributeDict
+from matplotlib import pyplot as plt
 
 from . import networks
 from . import MNLoss
@@ -348,27 +349,35 @@ class TwoTowerModel(pl.LightningModule):
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
         m, n = P.shape[0], Q.shape[0]
-        bsize_i = self.config.eval_bsize_i
-        bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n
-        segment_m = math.ceil(m/bsize_i)
-        segment_n = math.ceil(n/bsize_j)
-        for i in range(segment_m):
-            i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
-            score_mat = np.zeros((i_end-i_start, n))
-            target = self.Y_eval[i_start:i_end].todense()
-            for j in range(segment_n):
-                j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
-            self.eval_metric.update(target, score_mat)
-        metric_dict = self.eval_metric.get_metric_dict()
-        self.log_dict(metric_dict)
-        dump_log(config=self.config, metrics=metric_dict, split=split)
+        score_mat = P @ Q.T
+        conds = np.eye(m)
+        pos = np.extract(conds, score_mat)
+        neg = np.extract(1-conds, score_mat)
+        plt.hist(pos, density=True, color='r',label='pos')
+        plt.hist(neg, density=True, color='g',label='neg')
+        plt.legend()
+        plt.savefig('pos_vs_neg.png')
+        #bsize_i = self.config.eval_bsize_i
+        #bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n
+        #segment_m = math.ceil(m/bsize_i)
+        #segment_n = math.ceil(n/bsize_j)
+        #for i in range(segment_m):
+        #    i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
+        #    score_mat = np.zeros((i_end-i_start, n))
+        #    target = self.Y_eval[i_start:i_end].todense()
+        #    for j in range(segment_n):
+        #        j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
+        #        score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
+        #    self.eval_metric.update(target, score_mat)
+        #metric_dict = self.eval_metric.get_metric_dict()
+        #self.log_dict(metric_dict)
+        #dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
-            print(f'====== {split} dataset evaluation result =======')
-            print(self.eval_metric)
-            print('')
-            logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
-        self.eval_metric.reset()
-        #exit()
+        #if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
+        #    print(f'====== {split} dataset evaluation result =======')
+        #    print(self.eval_metric)
+        #    print('')
+        #    logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
+        #self.eval_metric.reset()
+        exit()
         return metric_dict

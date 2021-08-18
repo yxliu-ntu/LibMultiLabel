@@ -289,11 +289,13 @@ def main():
     logging.info(f'Run name: {config.run_name}')
     logging.debug(f'Config as:\n{config}')
     if config.eval:
+        print(config.checkpoint_path)
         model = _Model.load_from_checkpoint(
                 config.checkpoint_path,
                 config=config,
                 Y_eval=test_loader.dataset.Yu,
                 )
+        trainer.test(model, test_dataloaders=test_loader)
     else:
         if config.checkpoint_path:
             model = _Model.load_from_checkpoint(
@@ -310,14 +312,14 @@ def main():
         trainer.fit(model, train_loader, valid_loader)
 
 
-    if test_loader is not None:
-        logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
-        model = _Model.load_from_checkpoint(
-                checkpoint_callback.best_model_path,
-                config=config,
-                Y_eval=test_loader.dataset.Yu,
-                )
-        trainer.test(model, test_dataloaders=test_loader)
+        if test_loader is not None:
+            logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
+            model = _Model.load_from_checkpoint(
+                    checkpoint_callback.best_model_path,
+                    config=config,
+                    Y_eval=test_loader.dataset.Yu,
+                    )
+            trainer.test(model, test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':
