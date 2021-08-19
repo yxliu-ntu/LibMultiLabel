@@ -23,7 +23,6 @@ def get_bert_biencoder_componets(config,  **kwargs):
     biencoder = BiEncoder(question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder)
     return biencoder
 
-
 class HFBertEncoder(BertModel):
     def __init__(self, config, project_dim: int = 0):
         super().__init__(config)
@@ -44,8 +43,11 @@ class HFBertEncoder(BertModel):
         if dropout >= 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-        return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
-    
+        if config.isWithoutWeight:
+            return cls(cfg, project_dim=projection_dim)
+        else:
+            return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
+
     #def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
     def forward(self, input_ids, token_type_ids, attention_mask):
         res = super().forward(input_ids = input_ids,
@@ -61,7 +63,7 @@ class HFBertEncoder(BertModel):
             pooled_output = self.encode_proj(pooled_output)
             sequence_output = self.encode_proj(sequence_output)
         return sequence_output, pooled_output, hidden_states
-    
+
     def get_out_size(self):
         if self.encode_proj:
             return self.encode_proj.out_features

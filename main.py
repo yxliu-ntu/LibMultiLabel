@@ -128,6 +128,8 @@ def get_config():
     #                    help='Optional specification of the second dropout (default: %(default)s)')
     #parser.add_argument('--num_pool', type=int, default=1,
     #                    help='Number of pool for dynamic max-pooling (default: %(default)s)')
+    parser.add_argument('--isWithoutWeight', action='store_true',
+                        help='init model without pretrained weight')
 
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,
