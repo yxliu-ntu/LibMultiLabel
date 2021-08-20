@@ -39,6 +39,22 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_step
+        elif self.config.loss == 'DPR-DualMAE':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.dual_mae_loss,
+                    loss_func_minus=MNLoss.dual_mae_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-DualMSE':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.dual_mse_loss,
+                    loss_func_minus=MNLoss.dual_mse_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-L1Hinge':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -53,6 +69,22 @@ class TwoTowerModel(pl.LightningModule):
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.l2_hinge_loss,
                     loss_func_minus=MNLoss.l2_hinge_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-SQL2Hinge':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.dual_mse_loss,
+                    loss_func_minus=MNLoss.l2_hinge_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-L2HingeSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.l2_hinge_loss,
+                    loss_func_minus=MNLoss.dual_mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-LRLR':
