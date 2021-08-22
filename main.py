@@ -96,7 +96,15 @@ def get_config():
                         help='value for clipping gradient, 0 means don’t clip')
     parser.add_argument('--gradient_clip_algorithm', type=str, choices=['norm', 'value'], default='norm',
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
-    parser.add_argument('--loss', type=str, choices=['Minibatch', 'Sogram', 'Sogram-Cosine', 'Sogram-Scale', 'DPR-LRLR', 'DPR'], default='DPR',
+    parser.add_argument('--loss', type=str,
+                        choices=[
+                            'Minibatch',
+                            'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
+                            'DPR-L1Hinge', 'DPR-L2Hinge',
+                            'DPR-SQL2Hinge', 'DPR-L2HingeSQ',
+                            'DPR-DualMAE', 'DPR-DualMSE',
+                            'DPR-LRSQ', 'DPR-LRLR', 'DPR'
+                            ], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')

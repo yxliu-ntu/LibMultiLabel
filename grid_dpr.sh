@@ -7,6 +7,7 @@ task(){
 # Set up train command
 train_cmd="python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
+train_cmd="${train_cmd} --isWithoutWeight"
 wd=0.0
 
 # Print out all parameter pair
