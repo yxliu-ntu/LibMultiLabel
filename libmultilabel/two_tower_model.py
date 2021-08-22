@@ -353,10 +353,10 @@ class TwoTowerModel(pl.LightningModule):
         conds = np.eye(m)
         pos = np.extract(conds, score_mat)
         neg = np.extract(1-conds, score_mat)
-        plt.hist(pos, density=True, color='r',label='pos')
-        plt.hist(neg, density=True, color='g',label='neg')
+        plt.hist(pos, bins=100, density=True, color='r',label='pos')
+        plt.hist(neg, bins=100, density=True, color='g',label='neg')
         plt.legend()
-        plt.savefig('pos_vs_neg.png')
+        plt.savefig('%s_pos_vs_neg.png'%self.config.loss)
         #bsize_i = self.config.eval_bsize_i
         #bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n
         #segment_m = math.ceil(m/bsize_i)
