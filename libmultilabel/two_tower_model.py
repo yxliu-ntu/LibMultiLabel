@@ -39,6 +39,10 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_step
+        elif self.config.loss == 'RankingMSE':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = torch.nn.MSELoss(reduction='sum')
+            self.step = self._rankingmse_step
         elif self.config.loss == 'DPR-DualMAE':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -284,6 +288,16 @@ class TwoTowerModel(pl.LightningModule):
         loss = self.mnloss(logits, ys)
         #logging.debug(f'us: {us}, vs: {vs}')
         #logging.debug(f'ps:{ps.sum().item()}, qs:{qs.sum().item()}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _rankingmse_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys = 1.0 - torch.diag(batch['ys']) # negative pairs regress to 1 while pos pairs regress to 0
+        logits = ps @ qs.T
+        diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg
+        loss = self.mnloss(diffs, ys)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss
