@@ -13,7 +13,6 @@ wd=0.0
 # Print out all parameter pair
 for br in 64 #16 64 256 #1024
 do
-    #for lr in 2e-4 2e-5 2e-6
     for lr in 2e-5
     do
         #for seed in 1331 1333 1335 1337 1339
@@ -21,7 +20,7 @@ do
         do
             for omega in 1.0 0.0625 0.00390625 0.000244140625
             do
-                for r in -1
+                for r in -1 -5 -10 -15 -20 -25 -30 -35 -40 -45
                 do
                     cmd="${train_cmd} --learning_rate ${lr}"
                     #cmd="${cmd} --bratio ${br}"
