@@ -55,6 +55,15 @@ class TwoTowerModel(pl.LightningModule):
                     loss_func_minus=MNLoss.dual_mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-Cosine':
+            logging.info(f'loss_type: {self.config.loss}')
+            assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.dual_mse_loss,
+                    loss_func_minus=MNLoss.dual_mse_loss,
+                    )
+            self.step = self._dpr_cosine_step
         elif self.config.loss == 'DPR-L1Hinge':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -148,6 +157,7 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._sogram_scale_step
         elif self.config.loss == 'Sogram-Cosine':
             logging.info(f'loss_type: {self.config.loss}')
+            assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
             self.mnloss = MNLoss.SogramMNLoss(
                     self.config.k,
                     self.config.k1,
@@ -201,6 +211,11 @@ class TwoTowerModel(pl.LightningModule):
             ]
             optimizer = optim.AdamW(parameters, lr=learning_rate, eps=adam_eps)
             return optimizer
+
+        def _embedding_norm(x):
+            x_norm = torch.norm(x, dim=1, keepdim=True).detach()
+            x = x/x_norm
+            return x
 
         def _get_schedule_linear(
                 optimizer,
@@ -300,6 +315,20 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         return loss
 
+    def _dpr_cosine_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        self._tb_log(ps.detach(), qs.detach())
+        ps = _embedding_norm(ps)
+        qs = _embedding_norm(qs)
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = dense_to_sparse(torch.diag(batch['ys']))
+        _as = batch['_as']
+        _bs = batch['_bs']
+        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
     def _sogram_step(self, batch, batch_idx):
         #us = (batch['us'] - 1).cpu().numpy().flatten() # -1 for ml1m only
         #vs = (batch['vs'] - 1).cpu().numpy().flatten()
@@ -339,10 +368,6 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _sogram_cosine_step(self, batch, batch_idx):
-        def _embedding_norm(x):
-            x_norm = torch.norm(x, dim=1, keepdim=True).detach()
-            x = x/x_norm
-            return x
         ps, qs = self.network(batch['us'], batch['vs'])
         self._tb_log(ps.detach(), qs.detach())
         ps = _embedding_norm(ps)
@@ -398,6 +423,11 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
+        if 'cosine' in self.config.loss.lower():
+            P = _embedding_norm(P)
+            Q = _embedding_norm(Q)
+        if 'scale' in self.config.loss.lower():
+            raise ValueError
         return {
                 'P': P.detach().cpu().numpy() if P is not None else None, 
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,
