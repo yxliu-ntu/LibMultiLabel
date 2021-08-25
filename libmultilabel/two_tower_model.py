@@ -186,6 +186,11 @@ class TwoTowerModel(pl.LightningModule):
 
         return
 
+    def _embedding_norm(self, x):
+        x_norm = torch.norm(x, dim=1, keepdim=True).detach()
+        x = x/x_norm
+        return x
+
     def configure_optimizers(self):
         """
         Initialize an optimizer for the free parameters of the network.
@@ -215,11 +220,6 @@ class TwoTowerModel(pl.LightningModule):
             ]
             optimizer = optim.AdamW(parameters, lr=learning_rate, eps=adam_eps)
             return optimizer
-
-        def _embedding_norm(x):
-            x_norm = torch.norm(x, dim=1, keepdim=True).detach()
-            x = x/x_norm
-            return x
 
         def _get_schedule_linear(
                 optimizer,
@@ -332,8 +332,8 @@ class TwoTowerModel(pl.LightningModule):
     def _dpr_cosine_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         self._tb_log(ps.detach(), qs.detach())
-        ps = _embedding_norm(ps)
-        qs = _embedding_norm(qs)
+        ps = self._embedding_norm(ps)
+        qs = self._embedding_norm(qs)
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = dense_to_sparse(torch.diag(batch['ys']))
@@ -384,8 +384,8 @@ class TwoTowerModel(pl.LightningModule):
     def _sogram_cosine_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         self._tb_log(ps.detach(), qs.detach())
-        ps = _embedding_norm(ps)
-        qs = _embedding_norm(qs)
+        ps = self._embedding_norm(ps)
+        qs = self._embedding_norm(qs)
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = batch['ys']
@@ -438,8 +438,8 @@ class TwoTowerModel(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
         if 'cosine' in self.config.loss.lower():
-            P = _embedding_norm(P)
-            Q = _embedding_norm(Q)
+            P = self._embedding_norm(P) if P is not None else None
+            Q = self._embedding_norm(Q) if Q is not None else None
         if 'scale' in self.config.loss.lower():
             raise ValueError
         return {
