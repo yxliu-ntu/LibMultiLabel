@@ -13,7 +13,8 @@ wd=0.0
 # Print out all parameter pair
 for br in 64 #16 64 256 #1024
 do
-    for lr in 2e-4 2e-5 2e-6
+    #for lr in 2e-4 2e-5 2e-6
+    for lr in 2e-5
     do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339

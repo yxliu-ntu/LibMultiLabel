@@ -13,6 +13,7 @@ wd=0.0
 # Print out all parameter pair
 for br in 64 #16 64 256 #1024
 do
+    #for lr in 2e-4 2e-5 2e-6
     for lr in 2e-5
     do
         #for seed in 1331 1333 1335 1337 1339
@@ -20,13 +21,17 @@ do
         do
             for omega in 1.0 0.0625 0.00390625 0.000244140625
             do
-                cmd="${train_cmd} --learning_rate ${lr}"
-                #cmd="${cmd} --bratio ${br}"
-                cmd="${cmd} --bsize_i ${br} --bsize_j ${br}"
-                cmd="${cmd} --weight_decay ${wd}"
-                cmd="${cmd} --omega ${omega}"
-                cmd="${cmd} --seed ${seed}"
-                echo "${cmd}"
+                for r in 0.5 0 -0.5 -1
+                do
+                    cmd="${train_cmd} --learning_rate ${lr}"
+                    #cmd="${cmd} --bratio ${br}"
+                    cmd="${cmd} --bsize_i ${br} --bsize_j ${br}"
+                    cmd="${cmd} --weight_decay ${wd}"
+                    cmd="${cmd} --omega ${omega}"
+                    cmd="${cmd} --imp_r ${r}"
+                    cmd="${cmd} --seed ${seed}"
+                    echo "${cmd}"
+                done
             done
         done
     done
