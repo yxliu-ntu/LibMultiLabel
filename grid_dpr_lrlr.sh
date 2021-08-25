@@ -2,10 +2,11 @@
 
 # basic seting
 config=$1
+gpu=$2
 
 task(){
 # Set up train command
-train_cmd="python3 main.py"
+train_cmd="CUDA_VISIBLE_DEVICES=$gpu python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
 wd=0.0
 
@@ -14,7 +15,8 @@ for br in 64 #16 64 256 #1024
 do
     for lr in 2e-5
     do
-        for seed in 1331 1333 1335 1337 1339
+        #for seed in 1331 1333 1335 1337 1339
+        for seed in 1339
         do
             for omega in 1.0 0.0625 0.00390625 0.000244140625
             do
