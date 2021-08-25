@@ -98,7 +98,7 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            'Minibatch',
+                            'Minibatch', 'RankingMSE',
                             'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
                             'DPR-L1Hinge', 'DPR-L2Hinge',
                             'DPR-SQL2Hinge', 'DPR-L2HingeSQ',
