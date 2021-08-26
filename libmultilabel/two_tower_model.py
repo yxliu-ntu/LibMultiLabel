@@ -97,7 +97,15 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.l1_hinge_loss,
-                    loss_func_minus=MNLoss.dual_mae_loss,
+                    loss_func_minus=torch.nn.functional.l1_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-L1HingeSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.l1_hinge_loss,
+                    loss_func_minus=torch.nn.functional.mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-SQL2Hinge':
@@ -113,7 +121,7 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.l2_hinge_loss,
-                    loss_func_minus=MNLoss.dual_mse_loss,
+                    loss_func_minus=torch.nn.functional.mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-LRLR':

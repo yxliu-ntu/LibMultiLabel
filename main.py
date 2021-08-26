@@ -102,7 +102,7 @@ def get_config():
                             'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
                             'DPR-L1Hinge', 'DPR-L2Hinge',
                             'DPR-SQL2Hinge', 'DPR-L2HingeSQ',
-                            'DPR-MAEL1Hinge', 'DPR-L1HingeMAE',
+                            'DPR-MAEL1Hinge', 'DPR-L1HingeMAE', 'DPR-L1HingeSQ',
                             'DPR-DualMAE', 'DPR-DualMSE',
                             'DPR-LRSQ', 'DPR-LRLR', 'DPR-Cosine', 'DPR',
                             ], default='DPR',
