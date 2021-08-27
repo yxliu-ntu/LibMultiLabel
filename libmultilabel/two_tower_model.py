@@ -98,7 +98,15 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.l1_hinge_loss,
-                    loss_func_minus=MNLoss.dual_mae_loss,
+                    loss_func_minus=torch.nn.functional.l1_loss,
+                    )
+            self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-L1HingeSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = MNLoss.NaiveMNLoss(
+                    omega=self.config.omega,
+                    loss_func_plus=MNLoss.l1_hinge_loss,
+                    loss_func_minus=torch.nn.functional.mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-SQL2Hinge':
@@ -114,7 +122,7 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.l2_hinge_loss,
-                    loss_func_minus=MNLoss.dual_mse_loss,
+                    loss_func_minus=torch.nn.functional.mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-LRLR':
@@ -176,8 +184,20 @@ class TwoTowerModel(pl.LightningModule):
             raise
 
     def _tb_log(self, ps, qs):
-        self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
-        self.tbwriter.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
+        logits = ps @ qs.T
+        neg_mask = 1 - torch.eye(logits.size()[0])
+        pos = torch.diagonal(logits)
+        neg = torch.masked_select(logits, neg_mask.bool())
+        self.tbwriter.add_scalar("pos_mean", pos.mean(), self.global_step)
+        self.tbwriter.add_scalar("neg_mean", neg.mean(), self.global_step)
+
+        pos_neg_diff = pos.reshape(-1, 1) - logits
+        pos_neg_diff = pos_neg_diff.sum(dim=-1) / (pos_neg_diff.size()[-1] - 1.)
+        pos_neg_diff = (pos_neg_diff / pos).mean()
+        self.tbwriter.add_scalar("pos_neg_diff", pos_neg_diff, self.global_step)
+
+        #self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
+        #self.tbwriter.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
         #self.logger.experiment.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
         #self.logger.experiment.add_scalar("ps_max",  ps.norm(dim=1).max(),  self.global_step)
         #self.logger.experiment.add_scalar("ps_min",  ps.norm(dim=1).min(),  self.global_step)
