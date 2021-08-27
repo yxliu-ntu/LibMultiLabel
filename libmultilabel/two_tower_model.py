@@ -335,7 +335,7 @@ class TwoTowerModel(pl.LightningModule):
         ys = 1.0 - torch.diag(batch['ys']) # negative pairs regress to 1 while pos pairs regress to 0
         logits = ps @ qs.T
         diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg
-        loss = self.mnloss(diffs, ys)
+        loss = self.mnloss(diffs, ys*self.config.triplet_margin)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss
