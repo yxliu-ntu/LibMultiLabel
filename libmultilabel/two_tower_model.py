@@ -183,8 +183,20 @@ class TwoTowerModel(pl.LightningModule):
             raise
 
     def _tb_log(self, ps, qs):
-        self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
-        self.tbwriter.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
+        logits = ps @ qs.T
+        neg_mask = 1 - torch.eye(logits.size()[0])
+        pos = torch.diagonal(logits)
+        neg = torch.masked_select(logits, neg_mask.bool())
+        self.tbwriter.add_scalar("pos_mean", pos.mean(), self.global_step)
+        self.tbwriter.add_scalar("neg_mean", neg.mean(), self.global_step)
+
+        pos_neg_diff = pos.reshape(-1, 1) - logits
+        pos_neg_diff = pos_neg_diff.sum(dim=-1) / (pos_neg_diff.size()[-1] - 1.)
+        pos_neg_diff = (pos_neg_diff / pos).mean()
+        self.tbwriter.add_scalar("pos_neg_diff", pos_neg_diff, self.global_step)
+
+        #self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
+        #self.tbwriter.add_scalar("qs_mean", qs.norm(dim=1).mean(), self.global_step)
         #self.logger.experiment.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
         #self.logger.experiment.add_scalar("ps_max",  ps.norm(dim=1).max(),  self.global_step)
         #self.logger.experiment.add_scalar("ps_min",  ps.norm(dim=1).min(),  self.global_step)
