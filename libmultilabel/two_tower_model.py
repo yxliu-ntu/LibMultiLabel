@@ -137,7 +137,7 @@ class TwoTowerModel(pl.LightningModule):
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_minus=torch.nn.functional.mse_loss,
-                    has_bias=True,
+                    #has_bias=True,
                     )
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'Minibatch':
