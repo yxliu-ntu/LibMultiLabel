@@ -479,7 +479,7 @@ class TwoTowerModel(pl.LightningModule):
         Q = np.vstack([_data for _data in Q if _data is not None])
         m, n = P.shape[0], Q.shape[0]
         score_mat = P @ Q.T
-        conds = np.eye(m)
+        conds = self.Y_eval.todense() 
         pos = np.extract(conds, score_mat)
         neg = np.extract(1-conds, score_mat)
         plt.hist(pos, bins=100, density=True, color='r',label='pos')
