@@ -43,6 +43,9 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.MSELoss(reduction='sum')
             self.step = self._rankingmse_step
+        elif self.config.loss == 'DPR-Triplet':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.step = self._triplet_step
         elif self.config.loss == 'DPR-DualMAE':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -333,6 +336,17 @@ class TwoTowerModel(pl.LightningModule):
         logits = ps @ qs.T
         diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg
         loss = self.mnloss(diffs, ys)
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _triplet_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        mask = (1.0 - torch.diag(batch['ys'])).bool() # mask for negative pairs
+        logits = ps @ qs.T
+        diffs = logits - torch.diagonal(logits).reshape(-1, 1) # neg - pos
+        diffs = torch.masked_select(diffs, mask)
+        loss = torch.maximum(diffs + self.config.triplet_margin, torch.zeros_like(diffs)).sum()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss

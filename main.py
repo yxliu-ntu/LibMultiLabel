@@ -113,6 +113,8 @@ def get_config():
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
+    parser.add_argument('--triplet_margin', type=float, default=1.0,
+                        help='the value of margin in the Triplet loss')
 
     # model
     parser.add_argument('--model_name', default='KimCNN',
