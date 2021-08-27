@@ -1,12 +1,16 @@
 import copy
+import cv2
 import json
 import logging
 import os
 import time
-
 import numpy as np
 import torch
+import io
+import tensorflow as tf
+
 from pytorch_lightning.utilities.seed import seed_everything
+import matplotlib.pyplot as plt
 
 
 class Timer(object):
@@ -104,4 +108,17 @@ def dense_to_sparse(dense: torch.Tensor):
     indices = torch.nonzero(dense).t()
     values = dense[indices[0], indices[1]] # modify this based on dimensionality
     return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
+
+def plot_to_image(fig):
+    """Converts the matplotlib plot specified by 'figure' to a PNG image and
+    returns it. The supplied figure is closed and inaccessible after this call."""
+    # Save the plot to a PNG in memory.
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=180)
+    buf.seek(0)
+    img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    buf.close()
+    img = cv2.imdecode(img_arr, 1)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img
 

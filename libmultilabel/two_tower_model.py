@@ -6,6 +6,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import matplotlib.pyplot as plt
 from abc import abstractmethod
 from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
@@ -15,7 +16,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
-from .utils import dump_log, argsort_top_k, dense_to_sparse
+from .utils import dump_log, argsort_top_k, dense_to_sparse, plot_to_image
 
 
 class TwoTowerModel(pl.LightningModule):
@@ -195,7 +196,8 @@ class TwoTowerModel(pl.LightningModule):
 
         pos_neg_diff = pos.reshape(-1, 1) - logits
         pos_neg_diff = pos_neg_diff.sum(dim=-1) / (pos_neg_diff.size()[-1] - 1.)
-        pos_neg_diff = (pos_neg_diff / pos).mean()
+        pos_neg_diff = pos_neg_diff.mean()
+        #pos_neg_diff = (pos_neg_diff / pos).mean()
         self.tbwriter.add_scalar("pos_neg_diff", pos_neg_diff, self.global_step)
 
         #self.tbwriter.add_scalar("ps_mean", ps.norm(dim=1).mean(), self.global_step)
@@ -487,9 +489,40 @@ class TwoTowerModel(pl.LightningModule):
         return P, Q
 
     def _shared_eval_epoch_end(self, step_outputs, split):
+        def _plot_helper(P, Q):
+            logits = P @ Q.T
+            pos_mask = self.Y_eval.todense()
+            pos = np.extract(pos_mask, logits)
+            #abs_diffs = np.abs(pos.reshape(-1, 1) - logits)
+            ##print(np.argmin(abs_diffs, axis=-1).reshape(-1, 1))
+            #abs_diffs = np.where(pos_mask, np.inf, abs_diffs)
+            #neg_idx = np.argmin(abs_diffs, axis=-1).reshape(-1, 1)
+            ##print(neg_idx)
+            #neg = np.take_along_axis(logits, neg_idx, axis=-1).flatten()
+            neg = np.where(pos_mask, 0, logits).sum(axis=-1)
+            neg = neg/(Q.shape[0]-1.)
+
+            plt.clf()
+            figure = plt.figure(figsize=(6,6))
+            #print(P.shape[0], pos.shape, neg.shape)
+            #print(pos, neg)
+            plt.scatter(np.arange(P.shape[0])[::100], pos[::100], c='g', marker='o', label='pos')
+            plt.scatter(np.arange(P.shape[0])[::100], neg[::100], c='r', marker='x', label='neg')
+            plt.xlabel("query_index")
+            plt.ylabel("pq_score")
+            plt.tight_layout()
+            plt.legend(loc=3)
+
+            return figure
+
         P, Q = zip(*step_outputs)
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
+
+        fig = _plot_helper(P, Q)
+        #tf_image = plot_to_image(fig)
+        self.tbwriter.add_figure('record', fig, self.global_step)
+
         m, n = P.shape[0], Q.shape[0]
         bsize_i = self.config.eval_bsize_i
         bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n

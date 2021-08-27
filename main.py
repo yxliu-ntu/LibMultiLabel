@@ -74,6 +74,8 @@ def get_config():
                         help='Random seed (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10000,
                         help='Number of epochs to train (default: %(default)s)')
+    parser.add_argument('--max_steps', type=int, default=None,
+                        help='Number of steps to train (default: %(default)s)')
     parser.add_argument('--warmup_steps', type=int, default=0.0,
                         help='Number of warm-up steps for training (default: %(default)s)')
     parser.add_argument('--bratio', type=float, default=None,
@@ -181,6 +183,8 @@ def get_config():
                         help='Only run evaluation on the test set (default: %(default)s)')
     parser.add_argument('--checkpoint_path',
                         help='The checkpoint to warm-up with (default: %(default)s)')
+    parser.add_argument('--record', action='store_true',
+                        help='record some training info')
     parser.add_argument('-h', '--help', action='help')
 
     parser.set_defaults(**config)
@@ -251,11 +255,11 @@ def main():
             monitor=config.val_metric,
             mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
-    earlystopping_callback = EarlyStopping(
-            patience=config.patience,
-            monitor=config.val_metric,
-            mode='max' if config.val_metric != 'Aver-Rank' else 'min',
-            )
+    #earlystopping_callback = EarlyStopping(
+    #        patience=config.patience,
+    #        monitor=config.val_metric,
+    #        mode='max' if config.val_metric != 'Aver-Rank' else 'min',
+    #        )
     #tb_logger = pl_loggers.TensorBoardLogger(config.tfboard_log_dir, name=config.run_name)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -289,10 +293,10 @@ def main():
             num_sanity_val_steps=0,
             gpus=0 if config.cpu else 1,
             progress_bar_refresh_rate=0 if config.silent else 1,
-            max_steps=config.total_steps,
+            max_steps=config.total_steps if config.max_steps is None else config.max_steps,
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,
-            callbacks=[checkpoint_callback, earlystopping_callback],
+            callbacks=[checkpoint_callback], #earlystopping_callback],
             val_check_interval=val_check_interval,
             )
 
@@ -318,6 +322,7 @@ def main():
                     Y_eval=valid_loader.dataset.Yu,
                     )
 
+        trainer.validate(model, valid_loader)
         trainer.fit(model, train_loader, valid_loader)
 
 
