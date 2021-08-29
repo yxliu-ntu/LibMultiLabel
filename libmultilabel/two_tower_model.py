@@ -493,14 +493,15 @@ class TwoTowerModel(pl.LightningModule):
             logits = P @ Q.T
             pos_mask = self.Y_eval.todense()
             pos = np.extract(pos_mask, logits)
-            #abs_diffs = np.abs(pos.reshape(-1, 1) - logits)
-            ##print(np.argmin(abs_diffs, axis=-1).reshape(-1, 1))
-            #abs_diffs = np.where(pos_mask, np.inf, abs_diffs)
-            #neg_idx = np.argmin(abs_diffs, axis=-1).reshape(-1, 1)
-            ##print(neg_idx)
-            #neg = np.take_along_axis(logits, neg_idx, axis=-1).flatten()
-            neg = np.where(pos_mask, 0, logits).sum(axis=-1)
-            neg = neg/(Q.shape[0]-1.)
+
+            abs_diffs = np.abs(pos.reshape(-1, 1) - logits)
+            abs_diffs = np.where(pos_mask, np.inf, abs_diffs)
+            neg_idx = np.argmin(abs_diffs, axis=-1).reshape(-1, 1)
+            neg = np.take_along_axis(logits, neg_idx, axis=-1).flatten()
+            self.tbwriter.add_scalar("pos_neg_diff_nearest", (pos - neg).mean(), self.global_step)
+
+            neg_mean = np.where(pos_mask, 0, logits).sum(axis=-1)
+            neg_mean = neg_mean/(Q.shape[0]-1.)
 
             plt.clf()
             figure = plt.figure(figsize=(6,6))
@@ -508,6 +509,7 @@ class TwoTowerModel(pl.LightningModule):
             #print(pos, neg)
             plt.scatter(np.arange(P.shape[0])[::100], pos[::100], c='g', marker='o', label='pos')
             plt.scatter(np.arange(P.shape[0])[::100], neg[::100], c='r', marker='x', label='neg')
+            plt.scatter(np.arange(P.shape[0])[::100], neg_mean[::100], c='y', marker='s', label='neg_mean')
             plt.xlabel("query_index")
             plt.ylabel("pq_score")
             plt.tight_layout()
