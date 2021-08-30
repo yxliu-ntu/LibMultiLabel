@@ -8,6 +8,10 @@ task(){
 # Set up train command
 train_cmd="CUDA_VISIBLE_DEVICES=$gpu python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
+train_cmd="${train_cmd} --fix_q_encoder --fix_ctx_encoder"
+train_cmd="${train_cmd} --result_dir ./runs/extra_nn"
+train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/extra_nn"
+#train_cmd="${train_cmd} --isWithoutWeight"
 wd=0.0
 
 # Print out all parameter pair
@@ -18,12 +22,13 @@ do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339
         do
-            for omega in 1.0 0.0625 0.00390625 0.000244140625
+            for omega in 1.0 #0.0625 0.00390625 0.000244140625
             do
                 cmd="${train_cmd} --learning_rate ${lr}"
                 #cmd="${cmd} --bratio ${br}"
                 cmd="${cmd} --bsize_i ${br} --bsize_j ${br}"
                 cmd="${cmd} --weight_decay ${wd}"
+                cmd="${cmd} --projection_dim 128"
                 cmd="${cmd} --omega ${omega}"
                 cmd="${cmd} --seed ${seed}"
                 echo "${cmd}"
@@ -38,4 +43,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+#task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
