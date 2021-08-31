@@ -43,4 +43,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 2 -I {} sh -c {}
