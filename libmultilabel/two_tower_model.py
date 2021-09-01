@@ -266,10 +266,6 @@ class TwoTowerModel(pl.LightningModule):
                         )
             return LambdaLR(optimizer, _lr_lambda, last_epoch)
 
-        #for p in self.parameters():
-        #    if p.requires_grad:
-        #        print(p)
-        #exit()
         parameters = [p for p in self.parameters() if p.requires_grad]
         optimizer_name = self.config.optimizer
         scheduler = None

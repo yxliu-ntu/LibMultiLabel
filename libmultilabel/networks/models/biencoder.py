@@ -45,22 +45,6 @@ class BiEncoder(nn.Module):
                     segments,
                     attn_mask
                     )
-            #if fix_encoder:
-            #    with torch.no_grad():
-            #        sequence_output, pooled_output, hidden_states = sub_model(
-            #                ids,
-            #                segments,
-            #                attn_mask
-            #                )
-            #    if sub_model.training:
-            #        sequence_output.requires_grad_(requires_grad=True)
-            #        pooled_output.requires_grad_(requires_grad=True)
-            #else:
-            #    sequence_output, pooled_output, hidden_states = sub_model(
-            #            ids,
-            #            segments,
-            #            attn_mask
-            #            )
         return sequence_output, pooled_output, hidden_states
     
     def forward(self,
