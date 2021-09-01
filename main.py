@@ -145,6 +145,8 @@ def get_config():
                         help='freeze encoder of query')
     parser.add_argument('--fix_ctx_encoder', action='store_true',
                         help='freeze encoder of context')
+    parser.add_argument('--without_pretrained', action='store_true',
+                        help='load Bert models without pretrained weights')
 
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,

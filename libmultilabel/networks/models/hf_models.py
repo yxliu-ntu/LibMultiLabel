@@ -56,7 +56,10 @@ class HFBertEncoder(BertModel):
         if dropout >= 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-        return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
+        if config.without_pretrained:
+            return cls(config=cfg, project_dim=projection_dim, **kwargs)
+        else:
+            return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
     
     #def forward(self, input_ids:T, token_type_ids:T, attention_mask:T) -> Tuple[T,...]:
     def forward(self, input_ids, token_type_ids, attention_mask):
