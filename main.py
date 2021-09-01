@@ -139,6 +139,12 @@ def get_config():
     #                    help='Optional specification of the second dropout (default: %(default)s)')
     #parser.add_argument('--num_pool', type=int, default=1,
     #                    help='Number of pool for dynamic max-pooling (default: %(default)s)')
+    parser.add_argument('--projection_dim', type=int, default=0,
+                        help='embedding dimension for each tower after projection')
+    parser.add_argument('--fix_q_encoder', action='store_true',
+                        help='freeze encoder of query')
+    parser.add_argument('--fix_ctx_encoder', action='store_true',
+                        help='freeze encoder of context')
 
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,

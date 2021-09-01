@@ -11,16 +11,28 @@ def get_bert_biencoder_componets(config,  **kwargs):
     if not hasattr(config, 'projection_dim'):
         config.projection_dim = 0
     bert_path = config.bert_path
-    question_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
-                                                    cfg_name=config.pretrained_model_cfg,
-                                                    projection_dim=config.projection_dim,
-                                                    dropout=dropout, **kwargs)
-    ctx_encoder = HFBertEncoder.init_encoder(bert_path=bert_path,
-                                            cfg_name=config.pretrained_model_cfg,
-                                            projection_dim=config.projection_dim,
-                                            dropout=dropout,**kwargs)
+    question_encoder = HFBertEncoder.init_encoder(
+            bert_path=bert_path,
+            cfg_name=config.pretrained_model_cfg,
+            projection_dim=config.projection_dim,
+            dropout=dropout,
+            **kwargs
+            )
+    ctx_encoder = HFBertEncoder.init_encoder(
+            bert_path=bert_path,
+            cfg_name=config.pretrained_model_cfg,
+            projection_dim=config.projection_dim,
+            dropout=dropout,
+            **kwargs
+            )
+    fix_q_encoder = config.fix_q_encoder if hasattr(config, 'fix_q_encoder') else False
     fix_ctx_encoder = config.fix_ctx_encoder if hasattr(config, 'fix_ctx_encoder') else False
-    biencoder = BiEncoder(question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder)
+    biencoder = BiEncoder(
+            question_encoder,
+            ctx_encoder,
+            fix_q_encoder=fix_q_encoder,
+            fix_ctx_encoder=fix_ctx_encoder
+            )
     return biencoder
 
 

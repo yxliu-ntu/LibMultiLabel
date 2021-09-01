@@ -241,7 +241,7 @@ class TwoTowerModel(pl.LightningModule):
                     "weight_decay": 0.0,
                 },
             ]
-            optimizer = optim.AdamW(parameters, lr=learning_rate, eps=adam_eps)
+            optimizer = optim.AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
             return optimizer
 
         def _get_schedule_linear(
@@ -275,7 +275,7 @@ class TwoTowerModel(pl.LightningModule):
                                   weight_decay=self.config.weight_decay)
             torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adagrad':
-            optimizer = optim.Adagrad(self.network.parameters(),
+            optimizer = optim.Adagrad(parameters,
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate,
                                    initial_accumulator_value=0.1,

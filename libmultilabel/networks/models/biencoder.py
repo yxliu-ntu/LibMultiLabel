@@ -4,14 +4,28 @@ from torch import Tensor as T
 import torch
 
 class BiEncoder(nn.Module):
-    def __init__(self, question_model:nn.Module, ctx_model:nn.Module, fix_q_encoder:bool=False,\
-                        fix_ctx_encoder:bool=False, poly_m:int=4):
+    def __init__(self,
+            question_model:nn.Module,
+            ctx_model:nn.Module,
+            fix_q_encoder:bool=False,
+            fix_ctx_encoder:bool=False,
+            poly_m:int=4
+            ):
         super().__init__()
         self.question_model = question_model
         self.ctx_model = ctx_model
         self.fix_q_encoder = fix_q_encoder
         self.fix_ctx_encoder = fix_ctx_encoder
         self.poly_m = poly_m
+        if self.fix_q_encoder:
+            self._freeze_model(question_model)
+        if self.fix_ctx_encoder:
+            self._freeze_model(ctx_model)
+
+    def _freeze_model(self, model):
+        for n, param in model.named_parameters():
+            if 'encode_proj' not in n:
+                param.requires_grad = False
 
     @staticmethod
     def get_representation(
@@ -26,22 +40,11 @@ class BiEncoder(nn.Module):
         hidden_states = None
 
         if ids is not None:
-            if fix_encoder:
-                with torch.no_grad():
-                    sequence_output, pooled_output, hidden_states = sub_model(
-                            ids,
-                            segments,
-                            attn_mask
-                            )
-                if sub_model.training:
-                    sequence_output.requires_grad_(requires_grad=True)
-                    pooled_output.requires_grad_(requires_grad=True)
-            else:
-                sequence_output, pooled_output, hidden_states = sub_model(
-                        ids,
-                        segments,
-                        attn_mask
-                        )
+            sequence_output, pooled_output, hidden_states = sub_model(
+                    ids,
+                    segments,
+                    attn_mask
+                    )
         return sequence_output, pooled_output, hidden_states
     
     def forward(self,
