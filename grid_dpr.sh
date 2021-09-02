@@ -12,12 +12,13 @@ train_cmd="${train_cmd} --config ${config}"
 #train_cmd="${train_cmd} --result_dir ./runs/extra_nn"
 #train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/extra_nn"
 #train_cmd="${train_cmd} --isWithoutWeight"
+#train_cmd="${train_cmd} --projection_dim 128"
 wd=0.0
 
 # Print out all parameter pair
-for br in 64 #16 256 #1024
+for br in 64 #16 64 256 1024
 do
-    for lr in 2e-3 2e-4 2e-5 2e-6
+    for lr in 2e-5
     do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339
@@ -26,7 +27,6 @@ do
             #cmd="${cmd} --bratio ${br}"
             cmd="${cmd} --bsize_i ${br} --bsize_j ${br}"
             cmd="${cmd} --weight_decay ${wd}"
-            cmd="${cmd} --projection_dim 128"
             cmd="${cmd} --seed ${seed}"
             echo "${cmd}"
         done

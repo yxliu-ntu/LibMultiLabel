@@ -12,6 +12,7 @@ train_cmd="${train_cmd} --config ${config}"
 #train_cmd="${train_cmd} --result_dir ./runs/extra_nn"
 #train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/extra_nn"
 #train_cmd="${train_cmd} --isWithoutWeight"
+#train_cmd="${train_cmd} --projection_dim 128"
 wd=0.0
 
 # Print out all parameter pair
@@ -47,4 +48,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 2 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
