@@ -115,6 +115,12 @@ def get_config():
                         help='Imputed value for the negative part of the loss function')
     parser.add_argument('--triplet_margin', type=float, default=1.0,
                         help='the value of margin in the Triplet loss')
+    parser.add_argument('--embedding_l2norm', action='store_true',
+                        help='l2-normalize embedding')
+    parser.add_argument('--embedding_scaler', type=float, default=-1,
+                        help='the value for scaling embedding, only works when positive')
+    parser.add_argument('--imp_r_shift', type=float, default=0.0,
+                        help='the value for shifting imp_r')
 
     # model
     parser.add_argument('--model_name', default='KimCNN',
@@ -199,6 +205,7 @@ def get_config():
         if config['%s_path'%i] is None:
             config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
     config['dataset_type'] = 'cross' if 'Minibatch' in config.loss else 'nonzero'
+    config['final_imp_r'] = config['imp_r'] + config['imp_r_shift']
     return config
 
 

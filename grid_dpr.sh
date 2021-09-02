@@ -9,10 +9,12 @@ task(){
 train_cmd="CUDA_VISIBLE_DEVICES=$gpu python3 main.py"
 train_cmd="${train_cmd} --config ${config}"
 #train_cmd="${train_cmd} --fix_q_encoder --fix_ctx_encoder"
-#train_cmd="${train_cmd} --result_dir ./runs/extra_nn"
-#train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/extra_nn"
+train_cmd="${train_cmd} --result_dir ./runs/embedding_std"
+train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/embedding_std"
 #train_cmd="${train_cmd} --isWithoutWeight"
 #train_cmd="${train_cmd} --projection_dim 128"
+train_cmd="${train_cmd} --imp_r_shift 6.375143237143622"
+train_cmd="${train_cmd} --embedding_scaler 12.708224895712226"
 wd=0.0
 
 # Print out all parameter pair
