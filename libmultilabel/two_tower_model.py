@@ -64,7 +64,7 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-Cosine':
             logging.info(f'loss_type: {self.config.loss}')
-            assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
+            assert self.config.final_imp_r < 1.0 and self.config.final_imp_r >= -1.0
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
                     loss_func_plus=MNLoss.dual_mse_loss,
@@ -172,7 +172,7 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._sogram_scale_step
         elif self.config.loss == 'Sogram-Cosine':
             logging.info(f'loss_type: {self.config.loss}')
-            assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
+            assert self.config.final_imp_r < 1.0 and self.config.final_imp_r >= -1.0
             self.mnloss = MNLoss.SogramMNLoss(
                     self.config.k,
                     self.config.k1,
@@ -365,7 +365,7 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         ps = self._embedding_scale(ps)
         qs = self._embedding_scale(qs)
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = dense_to_sparse(torch.diag(batch['ys']))
         _as = batch['_as']
@@ -380,7 +380,7 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         ps = self._embedding_scale(ps)
         qs = self._embedding_scale(qs)
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = dense_to_sparse(torch.diag(batch['ys']))
         _as = batch['_as']
@@ -395,7 +395,7 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         ps = self._embedding_scale(ps)
         qs = self._embedding_scale(qs)
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = batch['ys']
         _as = batch['_as']
@@ -415,7 +415,7 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         ps = self._embedding_scale(ps)
         qs = self._embedding_scale(qs)
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = batch['ys']
         _as = batch['_as']
@@ -431,7 +431,7 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         ps = self._embedding_norm(ps)
         qs = self._embedding_norm(qs)
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         ys = batch['ys']
         _as = batch['_as']
@@ -446,7 +446,7 @@ class TwoTowerModel(pl.LightningModule):
         #us = (batch['U'] - 1).cpu().numpy().flatten()
         #vs = (batch['V'] - 1).cpu().numpy().flatten()
         P, Q = self.network(batch['U'], batch['V'])
-        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.final_imp_r
         Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         Y = batch['Y']
         A = batch['A']
