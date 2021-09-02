@@ -16,7 +16,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
-from .utils import dump_log, argsort_top_k, dense_to_sparse, plot_to_image
+from .utils import dump_log, argsort_top_k, dense_to_sparse
 
 
 class TwoTowerModel(pl.LightningModule):
@@ -491,6 +491,9 @@ class TwoTowerModel(pl.LightningModule):
     def _shared_eval_epoch_end(self, step_outputs, split):
         def _plot_helper(P, Q):
             logits = P @ Q.T
+            from scipy.stats import describe
+            print(describe(logits.flatten()))
+            print(describe((logits.flatten() - 81.016754)/np.sqrt(161.49898)))
             pos_mask = self.Y_eval.todense()
             pos = np.extract(pos_mask, logits)
 
