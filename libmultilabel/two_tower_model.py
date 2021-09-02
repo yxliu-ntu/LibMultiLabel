@@ -482,11 +482,6 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_step(self, batch, batch_idx):
         P, Q = self.network(batch['U'], batch['V'])
-        if 'cosine' in self.config.loss.lower():
-            P = self._embedding_norm(P) if P is not None else None
-            Q = self._embedding_norm(Q) if Q is not None else None
-        if 'scale' in self.config.loss.lower():
-            raise ValueError
         return {
                 'P': P.detach().cpu().numpy() if P is not None else None, 
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,
