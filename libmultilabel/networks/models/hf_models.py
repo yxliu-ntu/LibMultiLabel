@@ -16,6 +16,7 @@ def get_bert_biencoder_componets(config,  **kwargs):
             cfg_name=config.pretrained_model_cfg,
             projection_dim=config.projection_dim,
             dropout=dropout,
+            without_pretrained=config.without_pretrained,
             **kwargs
             )
     ctx_encoder = HFBertEncoder.init_encoder(
@@ -23,6 +24,7 @@ def get_bert_biencoder_componets(config,  **kwargs):
             cfg_name=config.pretrained_model_cfg,
             projection_dim=config.projection_dim,
             dropout=dropout,
+            without_pretrained=config.without_pretrained,
             **kwargs
             )
     fix_q_encoder = config.fix_q_encoder if hasattr(config, 'fix_q_encoder') else False
@@ -50,13 +52,14 @@ class HFBertEncoder(BertModel):
             cfg_name: str,
             projection_dim: int =0,
             dropout:float =0.1,
+            without_pretrained:bool =False,
             **kwargs
             ) -> BertModel:
         cfg = BertConfig.from_pretrained(bert_path)
         if dropout >= 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
-        if config.without_pretrained:
+        if without_pretrained:
             return cls(config=cfg, project_dim=projection_dim, **kwargs)
         else:
             return cls.from_pretrained(bert_path, config=cfg, project_dim=projection_dim, **kwargs)
