@@ -13,7 +13,6 @@ train_cmd="${train_cmd} --result_dir ./runs/embedding_std"
 train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/embedding_std"
 #train_cmd="${train_cmd} --isWithoutWeight"
 #train_cmd="${train_cmd} --projection_dim 128"
-train_cmd="${train_cmd} --imp_r_shift 6.375143237143622"
 train_cmd="${train_cmd} --embedding_scaler 12.708224895712226"
 wd=0.0
 

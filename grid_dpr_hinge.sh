@@ -13,7 +13,6 @@ train_cmd="${train_cmd} --result_dir ./runs/embedding_std"
 train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/embedding_std"
 #train_cmd="${train_cmd} --isWithoutWeight"
 #train_cmd="${train_cmd} --projection_dim 128"
-train_cmd="${train_cmd} --imp_r_shift 6.375143237143622"
 train_cmd="${train_cmd} --embedding_scaler 12.708224895712226"
 wd=0.0
 
@@ -25,10 +24,10 @@ do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339
         do
-            for omega in 1.0 0.0625 0.00390625 0.000244140625
-            #for omega in 6.103515625e-05 1.52587890625e-05 3.814697265625e-06 9.5367431640625e-07 2.384185791015625e-07
+            #for omega in 0.0625 0.03125 0.015625 0.0078125 0.00390625 0.001953125 0.0009765625 0.00048828125 0.000244140625
+            for omega in 0.0078125 0.00390625 0.001953125 0.0009765625
             do
-                for r in 0 -1 -2 -4 -8 #-5 -10 -15 -20 -25 -30 -35 -40 -45
+                for r in -1 -2 -4 #-8 #-5 -10 -15 -20 -25 -30 -35 -40 -45
                 do
                     cmd="${train_cmd} --learning_rate ${lr}"
                     #cmd="${cmd} --bratio ${br}"
