@@ -328,7 +328,7 @@ class TwoTowerModel(pl.LightningModule):
         ps = self._embedding_scale(ps)
         qs = self._embedding_scale(qs)
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-        logits = ps @ qs.T
+        logits = ps @ qs.T - 6.375143237143622
         loss = self.mnloss(logits, ys)
         #logging.debug(f'us: {us}, vs: {vs}')
         #logging.debug(f'ps:{ps.sum().item()}, qs:{qs.sum().item()}')
