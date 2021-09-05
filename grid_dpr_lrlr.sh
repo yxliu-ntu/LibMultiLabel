@@ -23,7 +23,7 @@ do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339
         do
-            for omega in 1.0 #0.0625 0.00390625 0.000244140625
+            for omega in 0.015625 0.00390625 0.0009765625 0.000244140625 6.103515625e-05 1.52587890625e-05
             do
                 cmd="${train_cmd} --learning_rate ${lr}"
                 #cmd="${cmd} --bratio ${br}"
@@ -43,4 +43,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 2 -I {} sh -c {}
