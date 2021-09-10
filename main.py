@@ -104,11 +104,14 @@ def get_config():
                             'DPR-SQL2Hinge', 'DPR-L2HingeSQ',
                             'DPR-MAEL1Hinge', 'DPR-L1HingeMAE', 'DPR-L1HingeSQ',
                             'DPR-DualMAE', 'DPR-DualMSE',
+                            'DPR-L2Dist','DPR-L2Dist-Var','DPR-L2Dist-Exp',
                             'DPR-LRSQ', 'DPR-LRLR', 'DPR-Cosine', 'DPR',
                             ], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')
+    parser.add_argument('--nu', type=float, default=1.0,
+                        help='Weight of Gaussian Kernel')
     parser.add_argument('--alpha', type=float, default=1.0,
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
