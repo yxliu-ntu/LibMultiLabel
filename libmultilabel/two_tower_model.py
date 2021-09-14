@@ -44,10 +44,18 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='mean')
             self.step = self._dpr_l2dist_step
-        #elif self.config.loss == 'DPR-L2Dist-Var':
-        #    logging.info(f'loss_type: {self.config.loss}')
-        #    #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
-        #    self.step = self._dpr_l2dist_var_step
+        elif self.config.loss == 'DPR-L2Dist-Var1':
+            logging.info(f'loss_type: {self.config.loss}')
+            #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
+            self.step = self._dpr_l2dist_var1_step
+        elif self.config.loss == 'DPR-L2Dist-Var2':
+            logging.info(f'loss_type: {self.config.loss}')
+            #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
+            self.step = self._dpr_l2dist_var2_step
+        elif self.config.loss == 'DPR-L2Dist-Var3':
+            logging.info(f'loss_type: {self.config.loss}')
+            #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
+            self.step = self._dpr_l2dist_var3_step
         elif self.config.loss == 'DPR-L2Dist-Exp':
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
@@ -56,6 +64,9 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.MSELoss(reduction='sum')
             self.step = self._rankingmse_step
+        elif self.config.loss == 'RankingExp':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.step = self._rankingexp_step
         elif self.config.loss == 'DPR-Triplet':
             logging.info(f'loss_type: {self.config.loss}')
             self.step = self._triplet_step
@@ -84,6 +95,12 @@ class TwoTowerModel(pl.LightningModule):
                     loss_func_minus=MNLoss.dual_mse_loss,
                     )
             self.step = self._dpr_cosine_step
+        elif self.config.loss == 'DPR-L2Dist-L1H':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.step = self._dpr_l2dist_l1h_step
+        elif self.config.loss == 'DPR-L2Dist-L2H':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.step = self._dpr_l2dist_l2h_step
         elif self.config.loss == 'DPR-L1Hinge':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -355,23 +372,72 @@ class TwoTowerModel(pl.LightningModule):
         self._tb_log(ps.detach(), qs.detach())
         return loss
 
-    #def _dpr_l2dist_var_step(self, batch, batch_idx):
-    #    ps, qs = self.network(batch['us'], batch['vs'])
-    #    ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-    #    logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
-    #    ploss = -torch.diagonal(logits).sum() 
-    #    nloss = torch.logsumexp(logits.reshape(1,-1), -1)
-    #    loss = ploss + nloss
-    #    logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
-    #    self._tb_log(ps.detach(), qs.detach())
-    #    return loss
+    def _dpr_l2dist_l1h_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        mask = (1.0 - torch.diag(batch['ys'])).bool() # mask for negative pairs
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        ploss = -torch.diagonal(logits).sum()
+        nlogits = torch.masked_select(logits, mask)
+        nloss = torch.maximum(self.config.triplet_margin + nlogits, torch.zeros_like(nlogits)).sum()
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _dpr_l2dist_l2h_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        mask = (1.0 - torch.diag(batch['ys'])).bool() # mask for negative pairs
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        ploss = -torch.diagonal(logits).sum()
+        nlogits = torch.masked_select(logits, mask)
+        nloss = torch.maximum(self.config.triplet_margin + nlogits, torch.zeros_like(nlogits)).pow(2).sum()
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _dpr_l2dist_var1_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        plogits = torch.diagonal(logits)  # -||p-q^+||^2
+        ploss = -plogits.sum()
+        nloss = self.config.omega * ps.shape[0] * torch.logsumexp(logits.reshape(1, -1), -1)
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _dpr_l2dist_var2_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        plogits = torch.diagonal(logits)  # -||p-q^+||^2
+        ploss = -plogits.sum() #- self.config.omega * self.config.M * torch.logsumexp(plogits.reshape(1,-1), -1)
+        nloss = self.config.omega * ps.shape[0] * torch.logsumexp((logits - torch.diag(plogits)).reshape(1, -1), -1)
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _dpr_l2dist_var3_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        plogits = torch.diagonal(logits)  # -||p-q^+||^2
+        ploss = -plogits.sum() - self.config.omega * ps.shape[0] * torch.logsumexp(plogits.reshape(1,-1), -1)
+        nloss = self.config.omega * ps.shape[0] * torch.logsumexp(logits.reshape(1, -1), -1)
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
 
     def _dpr_l2dist_exp_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
         plogits = torch.diagonal(logits)  # -||p-q^+||^2
-        ploss = -plogits.sum() - torch.exp(self.config.nu * plogits).sum()
+        ploss = -self.config.nu * plogits.sum() - torch.exp(self.config.nu * plogits).sum()
         nloss = torch.exp(self.config.nu * logits).sum()
         loss = ploss + nloss
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
@@ -384,6 +450,17 @@ class TwoTowerModel(pl.LightningModule):
         logits = ps @ qs.T
         diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg
         loss = self.mnloss(diffs, ys*self.config.triplet_margin)
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _rankingexp_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        mask = (1.0 - torch.diag(batch['ys'])).bool() # mask for negative pairs
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg 
+        diffs = torch.masked_select(diffs, mask)
+        loss = torch.logsumexp(-self.config.nu * diffs.reshape(1, -1), -1)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss
