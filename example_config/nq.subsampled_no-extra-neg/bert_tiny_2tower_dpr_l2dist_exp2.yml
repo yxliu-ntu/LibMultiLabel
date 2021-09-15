@@ -15,12 +15,12 @@ shuffle: True
 seed: 1337
 epochs: 30 #00
 optimizer: adamw-dpr
-patience: 100
+patience: 10
 pad_id: 0
 warmup_steps: 1237
 gradient_clip_val: 2.0
 gradient_clip_algorithm: norm
-loss: DPR-L2Dist-Exp
+loss: DPR-L2Dist-Exp2
 
 # eval
 eval_bsize_i: 256

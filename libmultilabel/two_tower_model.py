@@ -60,6 +60,10 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
             self.step = self._dpr_l2dist_exp_step
+        elif self.config.loss == 'DPR-L2Dist-Exp2':
+            logging.info(f'loss_type: {self.config.loss}')
+            #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
+            self.step = self._dpr_l2dist_exp2_step
         elif self.config.loss == 'RankingMSE':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.MSELoss(reduction='sum')
@@ -437,8 +441,20 @@ class TwoTowerModel(pl.LightningModule):
         ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
         plogits = torch.diagonal(logits)  # -||p-q^+||^2
-        ploss = -self.config.nu * plogits.sum() - torch.exp(self.config.nu * plogits).sum()
-        nloss = torch.exp(self.config.nu * logits).sum()
+        ploss = -self.config.nu * plogits.sum() - self.config.N / qs.shape[0] * torch.exp(self.config.nu * plogits).sum()
+        nloss = self.config.N / qs.shape[0] * torch.exp(self.config.nu * logits).sum()
+        loss = ploss + nloss
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
+        self._tb_log(ps.detach(), qs.detach())
+        return loss
+
+    def _dpr_l2dist_exp2_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
+        plogits = torch.diagonal(logits)  # -||p-q^+||^2
+        ploss = -plogits.sum() - self.config.N / qs.shape[0] * torch.exp(self.config.nu * plogits).sum()
+        nloss = self.config.N / qs.shape[0] * torch.exp(self.config.nu * logits).sum()
         loss = ploss + nloss
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
         self._tb_log(ps.detach(), qs.detach())
