@@ -105,7 +105,7 @@ def get_config():
                             'DPR-L1HL1H', 'DPR-L2HL2H',
                             'DPR-L1HSQ', 'DPR-L2HSQ',
                             'DPR-LRSQ', 'DPR-LRLR',
-                            'DPR-Cosine',
+                            #'DPR-Cosine',
                             #'DPR-SQL2H', 'DPR-MAEL1H', 'DPR-L1HMAE',
                             #'DPR-MAEMAE', 'DPR-MSEMSE',
                             'DPR-L2Dist',
@@ -113,7 +113,7 @@ def get_config():
                             'DPR-L2Dist-Var1', 'DPR-L2Dist-Var2',
                             'DPR-L2Dist-Exp1', 'DPR-L2Dist-Exp2',
                             'DPR-L2Dist-L1H', 'DPR-L2Dist-L2H',
-                            ], default='DPR',
+                            ], default=None,
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')
