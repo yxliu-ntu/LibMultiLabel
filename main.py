@@ -252,9 +252,10 @@ def main():
 
     config.device = init_device(use_cpu=config.cpu)
     config.pin_memory = 'cuda' in config.device.type
-    config.run_name = '{}_{}_{}'.format(
+    config.run_name = '{}_{}_{}_{}'.format(
         config.data_name,
         Path(config.config).stem if config.config else config.model_name,
+        config.loss,
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
     config['is_sogram'] = 'Sogram' in config.loss
