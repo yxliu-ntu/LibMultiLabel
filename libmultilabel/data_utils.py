@@ -19,6 +19,25 @@ UNK = Vocab.UNK
 PAD = '**PAD**'
 
 
+def newtokenize(text, word_dict, max_seq_length):
+    text = ' '.join(text.split(','))
+    tokenizer = RegexpTokenizer(r'\w+')
+    return [word_dict[t.lower()] for t in tokenizer.tokenize(text) if not t.isnumeric()][:max_seq_length]
+
+def generate_batch_sogram(data_batch):
+    data = data_batch[0]
+    us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['u']]
+    vs = [torch.LongTensor(v) for v in data['v']]
+    return {
+        'us': pad_sequence(us, batch_first=True),
+        'vs': pad_sequence(vs, batch_first=True),
+        '_as':  torch.FloatTensor(data['_a']),
+        '_bs':  torch.FloatTensor(data['_b']),
+        '_abs': torch.FloatTensor(data['_ab']),
+        '_bbs': torch.FloatTensor(data['_bb']),
+        'ys': torch.FloatTensor(data['y'].A1.ravel()),
+    }
+
 def generate_batch_nonzero(data_batch):
     us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
     vs = [torch.LongTensor(data['v']) for data in data_batch]
@@ -34,39 +53,23 @@ def generate_batch_nonzero(data_batch):
 
 def generate_batch_cross(data_batch):
     data = data_batch[0]
-    us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
-    vs = [torch.LongTensor(v) for v in data['vs']]
+    if data['us'] is not None:
+        us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
+    else:
+        us = None
+    if data['vs'] is not None:
+        vs = [torch.LongTensor(v) for v in data['vs']]
+    else:
+        vs = None
     return {
-        'U': pad_sequence(us, batch_first=True),
-        'V': pad_sequence(vs, batch_first=True),
-        'A':  torch.FloatTensor(data['_as']),
-        'B':  torch.FloatTensor(data['_bs']),
-        'Ab': torch.FloatTensor(data['_abs']),
-        'Bb': torch.FloatTensor(data['_bbs']),
-        'Y': _spmtx2tensor(data['ys']),
+        'U': pad_sequence(us, batch_first=True) if us is not None else None,
+        'V': pad_sequence(vs, batch_first=True) if vs is not None else None,
+        'A':  torch.FloatTensor(data['_as']) if us is not None else None,
+        'B':  torch.FloatTensor(data['_bs']) if vs is not None else None,
+        'Ab': torch.FloatTensor(data['_abs']) if us is not None else None,
+        'Bb': torch.FloatTensor(data['_bbs']) if vs is not None else None,
+        'Y': _spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
     }
-
-class TextDataset(Dataset):
-    """Class for text dataset"""
-
-    def __init__(self, data, word_dict, classes, max_seq_length):
-        self.data = data
-        self.word_dict = word_dict
-        self.classes = classes
-        self.max_seq_length = max_seq_length
-        self.num_classes = len(self.classes)
-        self.label_binarizer = MultiLabelBinarizer().fit([classes])
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        data = self.data[index]
-        return {
-            'text': torch.LongTensor([self.word_dict[word] for word in data['text']][:self.max_seq_length]),
-            'label': torch.FloatTensor(self.label_binarizer.transform([data['label']])[0]),
-            'index': data.get('index', 0)
-        }
 
 def _spmtx2tensor(spmtx):
     coo = coo_matrix(spmtx)
@@ -77,174 +80,3 @@ def _spmtx2tensor(spmtx):
     shape = coo.shape
     return torch.sparse_coo_tensor(idx, val, torch.Size(shape))
 
-def _build_mn_matrix(data, classes):
-    label_binarizer = MultiLabelBinarizer().fit([classes])
-    binary_label_matrix = [csr_matrix(label_binarizer.transform([d['label']])[0]) for d in data]
-    return sp_vstack(binary_label_matrix)
-
-def _data_transform(max_seq_length, data, word_dict, classes):
-    U = np.array([[word_dict[word] for word in d['text'][:max_seq_length]] \
-            for d in data], dtype=object)
-    V = np.arange(len(classes)).reshape(-1, 1)
-    Yu = _build_mn_matrix(data, classes)
-    Yv = Yu.transpose()
-    return U,V, Yu, Yv
-
-def generate_batch(data_batch):
-    text_list = [data['text'] for data in data_batch]
-    label_list = [data['label'] for data in data_batch]
-    return {
-        'index': [data['index'] for data in data_batch],
-        'text': pad_sequence(text_list, batch_first=True),
-        'label': torch.stack(label_list)
-    }
-
-
-def get_dataset_loader(config, data, word_dict, classes, shuffle=False, train=True):
-    if train:
-        if 'Ori' in config.loss:
-            dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
-        elif 'Sogram' in config.loss:
-            U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
-            dataset = NonzeroDataset(U, V, Yu, Yv, generate_batch_nonzero)
-        else:
-            U, V, Yu, Yv = _data_transform(config.max_seq_length, data, word_dict, classes)
-            dataset = CrossDataset(U, V, Yu, Yv, generate_batch_cross)
-    else:
-        dataset = TextDataset(data, word_dict, classes, config.max_seq_length)
-
-    if isinstance(dataset, CrossDataset):
-        dataset_loader = torch.utils.data.DataLoader(
-                dataset,
-                batch_sampler=CrossRandomBatchSampler(
-                    dataset, shuffle=shuffle,
-                    bsize_i=config.batch_size,
-                    bsize_j=config.batch_size_j if config.batch_size_j is not None else dataset.N),
-                num_workers=0,
-                collate_fn=dataset.generate_batch,  # LTD, generate_batch() move to in dataset
-                )
-    else:
-        dataset_loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=config.batch_size if train else config.eval_batch_size,
-            shuffle=shuffle,
-            num_workers=config.data_workers,
-            collate_fn=dataset.generate_batch if (train and 'Sogram' in config.loss) else generate_batch,
-            pin_memory='cuda' in config.device.type,
-        )
-    return dataset_loader
-
-
-def tokenize(text):
-    tokenizer = RegexpTokenizer(r'\w+')
-    return [t.lower() for t in tokenizer.tokenize(text) if not t.isnumeric()]
-
-
-def _load_raw_data(path, is_test=False):
-    logging.info(f'Load data from {path}.')
-    data = pd.read_csv(path, sep='\t', names=['label', 'text'],
-                       converters={'label': lambda s: s.split(),
-                                   'text': tokenize})
-    data = data.reset_index().to_dict('records')
-    if not is_test:
-        data = [d for d in data if len(d['label']) > 0]
-    return data
-
-
-def load_datasets(config):
-    datasets = {}
-    test_path = config.test_path or os.path.join(config.data_dir, 'test.txt')
-    if config.eval:
-        datasets['test'] = _load_raw_data(test_path, is_test=True)
-    else:
-        if os.path.exists(test_path):
-            datasets['test'] = _load_raw_data(test_path, is_test=True)
-        train_path = config.train_path or os.path.join(config.data_dir, 'train.txt')
-        datasets['train'] = _load_raw_data(train_path)
-        val_path = config.val_path or os.path.join(config.data_dir, 'valid.txt')
-        if os.path.exists(val_path):
-            datasets['val'] = _load_raw_data(val_path)
-        else:
-            datasets['train'], datasets['val'] = train_test_split(
-                datasets['train'], test_size=config.val_size, random_state=42)
-
-    msg = ' / '.join(f'{k}: {len(v)}' for k, v in datasets.items())
-    logging.info(f'Finish loading dataset ({msg})')
-    return datasets
-
-
-def load_or_build_text_dict(config, dataset):
-    if config.vocab_file:
-        logging.info(f'Load vocab from {config.vocab_file}')
-        with open(config.vocab_file, 'r') as fp:
-            vocab_list = [PAD] + [vocab.strip() for vocab in fp.readlines()]
-        vocabs = Vocab(collections.Counter(vocab_list), specials=[UNK],
-                       min_freq=1, specials_first=False) # specials_first=False to keep PAD index 0
-    else:
-        counter = collections.Counter()
-        for data in dataset:
-            unique_tokens = set(data['text'])
-            counter.update(unique_tokens)
-        vocabs = Vocab(counter, specials=[PAD, UNK],
-                       min_freq=config.min_vocab_freq)
-    logging.info(f'Read {len(vocabs)} vocabularies.')
-
-    if os.path.exists(config.embed_file):
-        logging.info(f'Load pretrained embedding from file: {config.embed_file}.')
-        embedding_weights = get_embedding_weights_from_file(vocabs, config.embed_file, config.silent)
-        vocabs.set_vectors(vocabs.stoi, embedding_weights,
-                           dim=embedding_weights.shape[1], unk_init=False)
-    elif not config.embed_file.isdigit():
-        logging.info(f'Load pretrained embedding from torchtext.')
-        vocabs.load_vectors(config.embed_file, cache=config.embed_cache_dir)
-    else:
-        raise NotImplementedError
-
-    return vocabs
-
-
-def load_or_build_label(config, datasets):
-    if config.label_file:
-        logging.info('Load labels from {config.label_file}')
-        with open(config.label_file, 'r') as fp:
-            classes = sorted([s.strip() for s in fp.readlines()])
-    else:
-        classes = set()
-        for dataset in datasets.values():
-            for d in tqdm(dataset, disable=config.silent):
-                classes.update(d['label'])
-        classes = sorted(classes)
-    return classes
-
-
-def get_embedding_weights_from_file(word_dict, embed_file, silent=False):
-    """If there is an embedding file, load pretrained word embedding.
-    Otherwise, assign a zero vector to that word.
-    """
-
-    with open(embed_file) as f:
-        word_vectors = f.readlines()
-
-    embed_size = len(word_vectors[0].split())-1
-    embedding_weights = [np.zeros(embed_size) for i in range(len(word_dict))]
-
-    vec_counts = 0
-    for word_vector in tqdm(word_vectors, disable=silent):
-        word, vector = word_vector.rstrip().split(' ', 1)
-        vector = np.array(vector.split()).astype(np.float)
-        vector = vector / float(np.linalg.norm(vector) + 1e-6)
-        embedding_weights[word_dict[word]] = vector
-        vec_counts += 1
-
-    logging.info(f'loaded {vec_counts}/{len(word_dict)} word embeddings')
-
-    """ Add UNK embedding.
-    Attention xml: np.random.uniform(-1.0, 1.0, emb_size)
-    CAML: np.random.randn(embed_size)
-    TODO. callback
-    """
-    unk_vector = np.random.randn(embed_size)
-    unk_vector = unk_vector / float(np.linalg.norm(unk_vector) + 1e-6)
-    embedding_weights[word_dict[word_dict.UNK]] = unk_vector
-
-    return torch.Tensor(embedding_weights)

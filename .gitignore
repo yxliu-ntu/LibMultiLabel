@@ -19,7 +19,9 @@ lib64/
 parts/
 sdist/
 var/
+others/
 runs/
+tfboard_logs/
 wheels/
 prof/
 pip-wheel-metadata/
@@ -133,6 +135,7 @@ dmypy.json
 .editorconfig
 .vscode/
 
+bert_models/
 dataset/*
 data/*
 output/*
@@ -148,4 +151,5 @@ tmp*
 *.lock
 *.pt
 *.zip
-apex
+*.ckpt
+*.tfevents.*

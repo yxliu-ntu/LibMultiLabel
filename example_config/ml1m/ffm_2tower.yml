@@ -1,0 +1,39 @@
+# data
+data_name: ml1m
+data_dir: data/ml1m
+#bert_path: prajjwal1/bert-tiny #./bert_models/bert_tiny
+trainL_path: data/ml1m/tr.csv
+trainR_path: data/ml1m/label.csv
+validL_path: data/ml1m/te.csv
+validR_path: data/ml1m/label.csv
+#max_seq_len: 256
+
+# train
+shuffle: True 
+seed: 1337
+epochs: 100
+bsize_i: 4096 
+optimizer: adagrad
+learning_rate: 1.0e-01
+weight_decay: 0
+patience: 50
+#pad_id: 0
+#warmup_steps: 1237
+gradient_clip_val: 0.0
+gradient_clip_algorithm: norm
+omega: 0.0625
+alpha: 1.0
+imp_r: -1.0
+
+# eval
+eval_bsize_i: 4096
+monitor_metrics: [P@5, P@10]
+val_metric: P@5
+
+# model
+model_name: FM2Tower
+drop_last: False
+dropout: 0.0
+k: 128
+k1: 4
+

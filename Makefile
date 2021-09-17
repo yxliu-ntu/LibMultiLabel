@@ -8,6 +8,7 @@ init:
 activate:
 	source ./venv/bin/activate; \
 	cat requirements.txt | xargs -n 1 -L 1 pip3 install; \
+	pip3 install -Ur requirements_parameter_search.txt; \
 
 clean:
 	rm -rf venv

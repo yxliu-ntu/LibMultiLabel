@@ -3,34 +3,10 @@ import json
 import logging
 import os
 import time
-import torch
 
 import numpy as np
-
-
-class ArgDict(dict):
-    def __init__(self, *args, **kwargs):
-        super(ArgDict, self).__init__(*args, **kwargs)
-        self.__dict__ = self
-
-
-class AverageMeter(object):
-    """Computes and stores the average and current value."""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
+import torch
+from pytorch_lightning.utilities.seed import seed_everything
 
 
 class Timer(object):
@@ -77,8 +53,8 @@ def dump_log(config, metrics, split):
         with open(log_path) as fp:
             result = json.load(fp)
     else:
-        config_to_save = copy.deepcopy(config.__dict__)
-        del config_to_save['device']
+        config_to_save = copy.deepcopy(dict(config))
+        config_to_save.pop('device', None)  # delete if device exists
         result = {'config': config_to_save}
 
     if split in result:
@@ -91,32 +67,12 @@ def dump_log(config, metrics, split):
     logging.info(f'Finish writing log to {log_path}.')
 
 
-def save_top_k_predictions(class_names, y_pred, predict_out_path, k=100):
-    """Save top k predictions to the predict_out_path. The format of this file is:
-    <label1>:<value1> <label2>:<value2> ...
-
-    Args:
-        class_names (list): list of class names
-        y_pred (ndarray): predictions (shape: number of samples * number of classes)
-        k (int): number of classes considered as the correct labels
-    """
-    assert predict_out_path, "Please specify the output path to the prediction results."
-
-    logging.info(f'Save top {k} predictions to {predict_out_path}.')
-    with open(predict_out_path, 'w') as fp:
-        for pred in y_pred:
-            label_ids = np.argsort(-pred).tolist()[:k]
-            out_str = ' '.join([f'{class_names[i]}:{pred[i]:.4}' for i in label_ids])
-            fp.write(out_str+'\n')
-
-
 def set_seed(seed):
     """Set seeds for numpy and pytorch."""
     if seed is not None:
         if seed >= 0:
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            torch.set_deterministic(True)
+            seed_everything(seed=seed)
+            torch.use_deterministic_algorithms(True)
             torch.backends.cudnn.benchmark = False
         else:
             logging.warning(
@@ -135,3 +91,17 @@ def init_device(use_cpu=False):
         torch.multiprocessing.set_sharing_strategy('file_system')
     logging.info(f'Using device: {device}')
     return device
+
+
+def argsort_top_k(vals, k, axis=-1):
+    unsorted_top_k_idx = np.argpartition(vals, -k, axis=axis)[:,-k:]
+    unsorted_top_k_scores = np.take_along_axis(vals, unsorted_top_k_idx, axis=axis)
+    sorted_order = np.argsort(-unsorted_top_k_scores, axis=axis)
+    sorted_top_k_idx = np.take_along_axis(unsorted_top_k_idx, sorted_order, axis=axis)
+    return sorted_top_k_idx
+
+def dense_to_sparse(dense: torch.Tensor):
+    indices = torch.nonzero(dense).t()
+    values = dense[indices[0], indices[1]] # modify this based on dimensionality
+    return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
+

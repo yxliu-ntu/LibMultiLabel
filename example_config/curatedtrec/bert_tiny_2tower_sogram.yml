@@ -1,0 +1,33 @@
+# data
+data_name: curatedtrec
+data_dir: data/curatedtrec
+bert_path: prajjwal1/bert-tiny
+trainL_path: data/curatedtrec/trainL.csv
+trainR_path: data/curatedtrec/trainR.csv
+validL_path: data/curatedtrec/valL.csv
+validR_path: data/curatedtrec/valR.csv
+max_seq_len: 256
+
+# train
+shuffle: True 
+seed: 1337
+epochs: 30 #00
+optimizer: adamw-dpr
+#patience: 1e7
+pad_id: 0
+warmup_steps: 1237
+gradient_clip_val: 2.0
+gradient_clip_algorithm: norm
+loss: Sogram
+
+# eval
+eval_bsize_i: 256
+eval_bsize_j: 256
+monitor_metrics: [Aver-Rank, R@20, R@100]
+val_metric: Aver-Rank
+
+# model
+model_name: Bert2Tower
+drop_last: False
+dropout: -1.0 # negative means use the default value
+

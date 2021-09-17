@@ -1,0 +1,57 @@
+# data
+data_name: curatedtrec
+data_dir: data/curatedtrec
+result_dir: runs/
+bert_path: prajjwal1/bert-tiny
+trainL_path: data/curatedtrec/trainL.csv
+trainR_path: data/curatedtrec/trainR.csv
+validL_path: data/curatedtrec/valL.csv
+validR_path: data/curatedtrec/valR.csv
+max_seq_len: 256
+
+# train
+shuffle: true 
+drop_last: False
+seed: 1337
+epochs: 50
+bratio: ['grid_search', [0.04, 0.015625, 0.01]]
+bsize_i: 16 #unused
+bsize_j: 16 #unused
+optimizer: adagrad
+learning_rate: ['grid_search', [1.0e-4, 1.0e-5, 1.0e-6]]
+weight_decay: ['grid_search', [1.0e-4, 1.0e-5, 1.0e-6]]
+momentum: 0.9
+patience: 10
+grad_clip_val: 0.0
+grad_clip_algorithm: norm
+loss: Sogram
+omega: ['grid_search', [1.0, 0.0625, 0.00390625]]
+imp_r: ['grid_search', [-1.0, -4.0, -16.0]]
+
+# model
+model_name: Bert2Tower
+init_weight: kaiming_uniform # unused
+activation: relu # unused
+k: 128 #unused
+k1: 4
+pad_id: 0
+dropout: -1.0 # negative means use the default value
+
+# eval
+eval_bsize_i: 16
+eval_bsize_j: 16
+metrics_thresholds: [0.5]
+monitor_metrics: [Aver-Rank, R@20, R@100]
+val_metric: Aver-Rank
+
+# hyperparamter search
+search_alg: basic_variant
+embed_cache_dir: .vector_cache
+
+# other parameters specified in main.py::get_args
+config: example_config/curatedtrec/cnn_tune_2tower.yml
+cpu: false
+silent: false 
+data_workers: 8
+eval: false
+checkpoint_path: null

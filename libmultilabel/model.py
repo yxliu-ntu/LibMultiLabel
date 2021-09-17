@@ -1,269 +1,141 @@
-import logging
-import os
-import shutil
+from abc import abstractmethod
+from argparse import Namespace
 
+import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from tqdm import tqdm
-import numpy as np
+from pytorch_lightning.utilities.parsing import AttributeDict
 
-from . import data_utils
 from . import networks
-from . import MNLoss
-from .evaluate import evaluate
-from .utils import AverageMeter, Timer, dump_log
+from .metrics import MultiLabelMetrics
+from .utils import dump_log, argsort_top_k
 
 
-class Model(object):
-    """High level model that handles initializing the underlying network
-    architecture, saving, updating examples, and predicting examples.
-    """
+class MultiLabelModel(pl.LightningModule):
+    """Abstract class handling Pytorch Lightning training flow"""
 
-    def __init__(self, config, word_dict=None, classes=None, ckpt=None):
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if isinstance(config, Namespace):
+            config = vars(config)
+        if isinstance(config, dict):
+            config = AttributeDict(config)
         self.config = config
-        self.device = config.device
-        self.start_epoch = 0
+        self.eval_metric = MultiLabelMetrics(self.config)
 
-        if ckpt:
-            self.config.run_name = ckpt['run_name']
-            self.word_dict = ckpt['word_dict']
-            self.classes = ckpt['classes']
-            self.best_metric = ckpt['best_metric']
-            self.start_epoch = ckpt['epoch']
-        else:
-            self.word_dict = word_dict
-            self.classes = classes
-            self.start_epoch = 0
-            self.best_metric = 0
-
-        self.config.num_classes = len(self.classes)
-
-        embed_vecs = self.word_dict.vectors
-        self.network = getattr(networks, config.model_name)(config, embed_vecs).to(self.device)
-        self.init_optimizer()
-
-        if ckpt:
-            self.network.load_state_dict(ckpt['state_dict'])
-            self.optimizer.load_state_dict(ckpt['optimizer'])
-        elif config.init_weight is not None:
-            init_weight = networks.get_init_weight_func(config)
-            self.network.apply(init_weight)
-
-    def init_optimizer(self, optimizer=None):
+    def configure_optimizers(self):
         """Initialize an optimizer for the free parameters of the network.
-        Args:
-            state_dict: network parameters
         """
-        parameters = [p for p in self.network.parameters() if p.requires_grad]
-        optimizer_name = optimizer or self.config.optimizer
+        parameters = [p for p in self.parameters() if p.requires_grad]
+        optimizer_name = self.config.optimizer
         if optimizer_name == 'sgd':
-            self.optimizer = optim.SGD(parameters, self.config.learning_rate,
-                                       momentum=self.config.momentum,
-                                       weight_decay=self.config.weight_decay)
+            optimizer = optim.SGD(parameters, self.config.learning_rate,
+                                  momentum=self.config.momentum,
+                                  weight_decay=self.config.weight_decay)
         elif optimizer_name == 'adam':
-            self.optimizer = optim.Adam(parameters, weight_decay=self.config.weight_decay, lr=self.config.learning_rate)
-
+            optimizer = optim.Adam(parameters,
+                                   weight_decay=self.config.weight_decay,
+                                   lr=self.config.learning_rate)
+        elif optimizer_name == 'adamw':
+            optimizer = optim.AdamW(parameters,
+                                    weight_decay=self.config.weight_decay,
+                                    lr=self.config.learning_rate)
         else:
-            raise RuntimeError('Unsupported optimizer: %s' % self.config.optimizer)
+            raise RuntimeError(
+                'Unsupported optimizer: {self.config.optimizer}')
 
         torch.nn.utils.clip_grad_value_(parameters, 0.5)
 
-    def train(self, train_data, val_data):
-        train_loader = data_utils.get_dataset_loader(
-            self.config, train_data, self.word_dict, self.classes,
-            shuffle=self.config.shuffle, train=True)
-        val_loader = data_utils.get_dataset_loader(
-            self.config, val_data, self.word_dict, self.classes, train=False)
+        return optimizer
 
-        logging.info('Start training')
-        try:
-            epoch = self.start_epoch + 1
-            patience = self.config.patience
-            while epoch <= self.config.epochs:
-                if patience == 0:
-                    logging.info('Reach training patience. Stopping...')
-                    break
+    @abstractmethod
+    def shared_step(self, batch):
+        """Return loss and predicted logits"""
+        return NotImplemented
 
-                logging.info(f'============= Starting epoch {epoch} =============')
-
-                self.train_epoch(train_loader)
-
-                timer = Timer()
-                logging.info('Start predicting a validation set')
-                val_metrics = evaluate(model=self, dataset_loader=val_loader,
-                                       monitor_metrics=self.config.monitor_metrics, silent=self.config.silent)
-                metric_dict = val_metrics.get_metric_dict(use_cache=False)
-                logging.info(f'Time for evaluating val set = {timer.time():.2f} (s)')
-
-                dump_log(self.config, metric_dict, split='val')
-                if not self.config.silent:
-                    print(val_metrics)
-
-                if metric_dict[self.config.val_metric] > self.best_metric:
-                    self.best_metric = metric_dict[self.config.val_metric]
-                    self.save(epoch, is_best=True)
-                    patience = self.config.patience
-                else:
-                    logging.info(f'Performance does not increase, training will stop in {patience} epochs')
-                    self.save(epoch)
-                    patience -= 1
-
-                epoch += 1
-        except KeyboardInterrupt:
-            logging.info('Training process terminated')
-
-    def train_epoch(self, data_loader):
-        """Run through one epoch of model training with the provided data loader."""
-
-        train_loss = AverageMeter()
-        epoch_time = Timer()
-        progress_bar = tqdm(data_loader, disable=self.config.silent)
-        if self.config.loss == 'Naive-LRLR':
-            mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega, loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits)
-        elif self.config.loss == 'Naive-LRSQ':
-            mnloss = MNLoss.NaiveMNLoss(omega=self.config.omega)
-        elif self.config.loss == 'Minibatch-LRSQ':
-            mnloss = MNLoss.MinibatchMNLoss(omega=self.config.omega)
-        elif self.config.loss == 'Sogram-LRSQ':
-            mnloss = MNLoss.SogramMNLoss(self.config.num_filter_per_size*len(self.config.filter_sizes), self.config.k1, \
-                    torch.float, self.device, alpha=self.config.alpha, omega=self.config.omega)
+    def training_step(self, batch, batch_idx):
+        loss, _ = self.shared_step(batch)
+        if batch_idx < 100:
+            print(batch_idx, loss.item()) 
+            #print(batch)
         else:
-            mnloss = None
+            exit(0)
+        return loss
 
-        for idx, batch in enumerate(progress_bar):
-            loss = self.train_step(batch, mnloss)
-            train_loss.update(loss)
-            progress_bar.set_postfix(loss=train_loss.avg)
-            if idx < 100:
-                print(idx, loss) 
-                #print(batch)
-            else:
-                exit(0)
+    def validation_step(self, batch, batch_idx):
+        return self._shared_eval_step(batch, batch_idx)
 
-        logging.info(f'Epoch done. Time for epoch = {epoch_time.time():.2f} (s)')
-        logging.info(f'Epoch loss: {train_loss.avg}')
+    def validation_step_end(self, batch_parts):
+        return self._shared_eval_step_end(batch_parts)
 
-    def train_step(self, inputs, mnloss=None):
-        """Forward a batch of examples; stop the optimizer to update weights.
-        """
-        def _dense_to_sparse(dense):
-            indices = torch.nonzero(dense).t()
-            values = dense[indices[0], indices[1]] # modify this based on dimensionality
-            return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
-        # Train mode
-        self.network.train()
+    def validation_epoch_end(self, step_outputs):
+        return self._shared_eval_epoch_end(step_outputs, 'val')
 
-        for key in inputs:
-            if isinstance(inputs[key], torch.Tensor):
-                inputs[key] = inputs[key].to(self.device, non_blocking=True)
+    def test_step(self, batch, batch_idx):
+        return self._shared_eval_step(batch, batch_idx)
 
-        # Run forward
-        if '2Tower' in self.config.model_name:
-            if mnloss is None:
-                target_labels = inputs['label']
-                P, Q = self.network(inputs['text'])
-                logits = P @ Q.T
-                loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
-            elif isinstance(mnloss, MNLoss.SogramMNLoss):
-                ps, qs = self.network(inputs['us'], inputs['vs'])
-                ys = inputs['ys']
-                pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-                _as = inputs['_as']
-                _bs = inputs['_bs']
-                _abs = inputs['_abs']
-                _bbs = inputs['_bbs']
-                loss = mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-            else:
-                P, Q = self.network(inputs['U'], inputs['V'])
-                Y = inputs['Y']
-                A = inputs['A']
-                B = inputs['B']
-                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-                loss = mnloss(Y, A, B, P, Q, Pt, Qt)
-        else:
-            target_labels = inputs['label']
-            outputs = self.network(inputs['text'])
-            logits = outputs['logits']
-            loss = F.binary_cross_entropy_with_logits(logits, target_labels, reduction='sum')
+    def test_step_end(self, batch_parts):
+        return self._shared_eval_step_end(batch_parts)
 
-        # Update parameters
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+    def test_epoch_end(self, step_outputs):
+        return self._shared_eval_epoch_end(step_outputs, 'test')
 
-        return loss.item()
+    def _shared_eval_step(self, batch, batch_idx):
+        loss, pred_logits = self.shared_step(batch)
+        return {'loss': loss.item(),
+                'pred_scores': torch.sigmoid(pred_logits).detach().cpu().numpy(),
+                'target': batch['label'].detach().cpu().numpy()}
 
-    def predict(self, inputs):
-        """Forward a batch of examples only to get predictions.
+    def _shared_eval_step_end(self, batch_parts):
+        pred_scores = np.vstack(batch_parts['pred_scores'])
+        target = np.vstack(batch_parts['target'])
+        return self.eval_metric.update(target, pred_scores)
 
-        Args:
-            inputs: the batch of inputs
-            top_n: Number of predictions to return per batch element (default: all predictions).
-        Output:
-            {
-                'scores': predicted score tensor,
-                'logits': predicted logit tensor,
-                'outputs': full predict output,
-                'top_results': top results from extract_top_n_predictions.
-            }
-        """
-        # Eval mode
-        self.network.eval()
+    def _shared_eval_epoch_end(self, step_outputs, split):
+        metric_dict = self.eval_metric.get_metric_dict()
+        self.log_dict(metric_dict)
+        dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        # Transfer to GPU
-        for key in inputs:
-            if isinstance(inputs[key], torch.Tensor):
-                inputs[key] = inputs[key].to(self.device, non_blocking=True)
+        if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
+            print(f'====== {split} dataset evaluation result =======')
+            print(self.eval_metric)
+            print()
+        self.eval_metric.reset()
+        return metric_dict
 
-        # Run forward
-        with torch.no_grad():
-            if '2Tower' in self.config.model_name:
-                P, Q = self.network(inputs['text'])
-                logits = P @ Q.T
-                outputs = {'logits': logits}
-            else:
-                outputs = self.network(inputs['text'])
-                logits = outputs['logits']
-            batch_label_scores = torch.sigmoid(logits)
+    def predict_step(self, batch, batch_idx, dataloader_idx):
+        outputs = self.network(batch['text'])
+        pred_scores= torch.sigmoid(outputs['logits']).detach().cpu().numpy()
+        k = self.config.save_k_predictions
+        top_k_idx = argsort_top_k(pred_scores, k, axis=1)
+        top_k_scores = np.take_along_axis(pred_scores, top_k_idx, axis=1)
 
-        return {
-            'scores': batch_label_scores,
-            'logits': logits,
-            'outputs': outputs,
-        }
+        return {'top_k_pred': top_k_idx,
+                'top_k_pred_scores': top_k_scores}
 
-    def save(self, epoch, is_best=False):
-        self.network.eval()
-        ckpt = {
-            'epoch': epoch,
-            'run_name': self.config.run_name,
-            'state_dict': self.network.state_dict(),
-            'word_dict': self.word_dict,
-            'classes': self.classes,
-            'optimizer': self.optimizer.state_dict(),
-            'best_metric': self.best_metric,
-        }
-        ckpt_path = os.path.join(self.config.result_dir,
-                                 self.config.run_name, 'model_last.pt')
-        os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
-        logging.info(f"Save current  model: {ckpt_path}")
-        torch.save(ckpt, ckpt_path)
-        if is_best:
-            best_ckpt_path = ckpt_path.replace('last', 'best')
-            logging.info(f"Save best model ({self.config.val_metric}: {self.best_metric}): {best_ckpt_path}")
-            shutil.copyfile(ckpt_path, best_ckpt_path)
-        self.network.train()
 
-    @staticmethod
-    def load(config, ckpt_path):
-        ckpt = torch.load(ckpt_path)
-        return Model(config, ckpt=ckpt)
+class Model(MultiLabelModel):
+    def __init__(self, config, word_dict=None, classes=None):
+        super().__init__(config)
+        self.save_hyperparameters()
 
-    def load_best(self):
-        best_ckpt_path = os.path.join(self.config.result_dir,
-                                      self.config.run_name, 'model_best.pt')
-        best_model = self.load(self.config, best_ckpt_path)
-        self.network = best_model.network
+        self.word_dict = word_dict
+        self.classes = classes
+        self.config.num_classes = len(self.classes)
+
+        embed_vecs = self.word_dict.vectors
+        self.network = getattr(networks, self.config.model_name)(
+            self.config, embed_vecs)
+
+        if config.init_weight is not None:
+            init_weight = networks.get_init_weight_func(self.config)
+            self.apply(init_weight)
+
+    def shared_step(self, batch):
+        target_labels = batch['label']
+        outputs = self.network(batch['text'])
+        pred_logits = outputs['logits']
+        loss = F.binary_cross_entropy_with_logits(pred_logits, target_labels, reduction='sum')
+        return loss, pred_logits
