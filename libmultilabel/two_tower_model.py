@@ -52,11 +52,11 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
             self.step = self._dpr_l2dist_var2_step
-        elif self.config.loss == 'DPR-L2Dist-Var3':
-            logging.info(f'loss_type: {self.config.loss}')
-            #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
-            self.step = self._dpr_l2dist_var3_step
-        elif self.config.loss == 'DPR-L2Dist-Exp':
+        #elif self.config.loss == 'DPR-L2Dist-Var3':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
+        #    self.step = self._dpr_l2dist_var3_step
+        elif self.config.loss == 'DPR-L2Dist-Exp1':
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
             self.step = self._dpr_l2dist_exp_step
@@ -64,32 +64,32 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             #self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
             self.step = self._dpr_l2dist_exp2_step
-        elif self.config.loss == 'RankingMSE':
+        elif self.config.loss == 'DPR-RankingMSE':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.MSELoss(reduction='sum')
             self.step = self._rankingmse_step
-        elif self.config.loss == 'RankingExp':
+        elif self.config.loss == 'DPR-L2Dist-RankingExp':
             logging.info(f'loss_type: {self.config.loss}')
-            self.step = self._rankingexp_step
+            self.step = self._l2dist_rankingexp_step
         elif self.config.loss == 'DPR-Triplet':
             logging.info(f'loss_type: {self.config.loss}')
             self.step = self._triplet_step
-        elif self.config.loss == 'DPR-DualMAE':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    loss_func_plus=MNLoss.dual_mae_loss,
-                    loss_func_minus=MNLoss.dual_mae_loss,
-                    )
-            self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-DualMSE':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    loss_func_plus=MNLoss.dual_mse_loss,
-                    loss_func_minus=MNLoss.dual_mse_loss,
-                    )
-            self.step = self._dpr_lrlrsq_step
+        #elif self.config.loss == 'DPR-MAEMAE':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            loss_func_plus=MNLoss.dual_mae_loss,
+        #            loss_func_minus=MNLoss.dual_mae_loss,
+        #            )
+        #    self.step = self._dpr_lrlrsq_step
+        #elif self.config.loss == 'DPR-MSEMSE':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            loss_func_plus=MNLoss.dual_mse_loss,
+        #            loss_func_minus=MNLoss.dual_mse_loss,
+        #            )
+        #    self.step = self._dpr_lrlrsq_step
         elif self.config.loss == 'DPR-Cosine':
             logging.info(f'loss_type: {self.config.loss}')
             assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
@@ -105,7 +105,7 @@ class TwoTowerModel(pl.LightningModule):
         elif self.config.loss == 'DPR-L2Dist-L2H':
             logging.info(f'loss_type: {self.config.loss}')
             self.step = self._dpr_l2dist_l2h_step
-        elif self.config.loss == 'DPR-L1Hinge':
+        elif self.config.loss == 'DPR-L1HL1H':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
@@ -113,7 +113,7 @@ class TwoTowerModel(pl.LightningModule):
                     loss_func_minus=MNLoss.l1_hinge_loss,
                     )
             self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-L2Hinge':
+        elif self.config.loss == 'DPR-L2HL2H':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
@@ -121,23 +121,23 @@ class TwoTowerModel(pl.LightningModule):
                     loss_func_minus=MNLoss.l2_hinge_loss,
                     )
             self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-MAEL1Hinge':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    loss_func_plus=MNLoss.dual_mae_loss,
-                    loss_func_minus=MNLoss.l1_hinge_loss,
-                    )
-            self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-L1HingeMAE':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    loss_func_plus=MNLoss.l1_hinge_loss,
-                    loss_func_minus=torch.nn.functional.l1_loss,
-                    )
-            self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-L1HingeSQ':
+        #elif self.config.loss == 'DPR-MAEL1H':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            loss_func_plus=MNLoss.dual_mae_loss,
+        #            loss_func_minus=MNLoss.l1_hinge_loss,
+        #            )
+        #    self.step = self._dpr_lrlrsq_step
+        #elif self.config.loss == 'DPR-L1HMAE':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            loss_func_plus=MNLoss.l1_hinge_loss,
+        #            loss_func_minus=torch.nn.functional.l1_loss,
+        #            )
+        #    self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-L1HSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
@@ -145,15 +145,15 @@ class TwoTowerModel(pl.LightningModule):
                     loss_func_minus=torch.nn.functional.mse_loss,
                     )
             self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-SQL2Hinge':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    loss_func_plus=MNLoss.dual_mse_loss,
-                    loss_func_minus=MNLoss.l2_hinge_loss,
-                    )
-            self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'DPR-L2HingeSQ':
+        #elif self.config.loss == 'DPR-SQL2H':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            loss_func_plus=MNLoss.dual_mse_loss,
+        #            loss_func_minus=MNLoss.l2_hinge_loss,
+        #            )
+        #    self.step = self._dpr_lrlrsq_step
+        elif self.config.loss == 'DPR-L2HSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
@@ -176,46 +176,46 @@ class TwoTowerModel(pl.LightningModule):
                     #has_bias=True,
                     )
             self.step = self._dpr_lrlrsq_step
-        elif self.config.loss == 'Minibatch':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.MinibatchMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    )
-            self.step = self._minibatch_step
-        elif self.config.loss == 'Sogram':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.SogramMNLoss(
-                    self.config.k,
-                    self.config.k1,
-                    alpha=self.config.alpha,
-                    omega=self.config.omega,
-                    nnz=self.config.nnz
-                    )
-            self.step = self._sogram_step
-        elif self.config.loss == 'Sogram-Scale':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.SogramMNLoss(
-                    self.config.k,
-                    self.config.k1,
-                    alpha=self.config.alpha,
-                    omega=self.config.omega,
-                    nnz=self.config.nnz
-                    )
-            self.step = self._sogram_scale_step
-        elif self.config.loss == 'Sogram-Cosine':
-            logging.info(f'loss_type: {self.config.loss}')
-            assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
-            self.mnloss = MNLoss.SogramMNLoss(
-                    self.config.k,
-                    self.config.k1,
-                    alpha=self.config.alpha,
-                    omega=self.config.omega,
-                    nnz=self.config.nnz,
-                    loss_func=torch.nn.functional.mse_loss
-                    )
-            self.step = self._sogram_cosine_step
+        #elif self.config.loss == 'Minibatch':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.MinibatchMNLoss(
+        #            omega=self.config.omega,
+        #            M=self.config.M,
+        #            N=self.config.N,
+        #            )
+        #    self.step = self._minibatch_step
+        #elif self.config.loss == 'Sogram':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.SogramMNLoss(
+        #            self.config.k,
+        #            self.config.k1,
+        #            alpha=self.config.alpha,
+        #            omega=self.config.omega,
+        #            nnz=self.config.nnz
+        #            )
+        #    self.step = self._sogram_step
+        #elif self.config.loss == 'Sogram-Scale':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.SogramMNLoss(
+        #            self.config.k,
+        #            self.config.k1,
+        #            alpha=self.config.alpha,
+        #            omega=self.config.omega,
+        #            nnz=self.config.nnz
+        #            )
+        #    self.step = self._sogram_scale_step
+        #elif self.config.loss == 'Sogram-Cosine':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    assert self.config.imp_r < 1.0 and self.config.imp_r >= -1.0
+        #    self.mnloss = MNLoss.SogramMNLoss(
+        #            self.config.k,
+        #            self.config.k1,
+        #            alpha=self.config.alpha,
+        #            omega=self.config.omega,
+        #            nnz=self.config.nnz,
+        #            loss_func=torch.nn.functional.mse_loss
+        #            )
+        #    self.step = self._sogram_cosine_step
         else:
             raise
 
@@ -382,7 +382,7 @@ class TwoTowerModel(pl.LightningModule):
         logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
         ploss = -torch.diagonal(logits).sum()
         nlogits = torch.masked_select(logits, mask)
-        nloss = torch.maximum(self.config.triplet_margin + nlogits, torch.zeros_like(nlogits)).sum()
+        nloss = torch.maximum(self.config.margin + nlogits, torch.zeros_like(nlogits)).sum()
         loss = ploss + nloss
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
         self._tb_log(ps.detach(), qs.detach())
@@ -394,7 +394,7 @@ class TwoTowerModel(pl.LightningModule):
         logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
         ploss = -torch.diagonal(logits).sum()
         nlogits = torch.masked_select(logits, mask)
-        nloss = torch.maximum(self.config.triplet_margin + nlogits, torch.zeros_like(nlogits)).pow(2).sum()
+        nloss = torch.maximum(self.config.margin + nlogits, torch.zeros_like(nlogits)).pow(2).sum()
         loss = ploss + nloss
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}, ploss: {ploss.item()}, nloss: {nloss.item()}')
         self._tb_log(ps.detach(), qs.detach())
@@ -465,12 +465,12 @@ class TwoTowerModel(pl.LightningModule):
         ys = 1.0 - torch.diag(batch['ys']) # negative pairs regress to 1 while pos pairs regress to 0
         logits = ps @ qs.T
         diffs = torch.diagonal(logits).reshape(-1, 1) - logits # pos - neg
-        loss = self.mnloss(diffs, ys*self.config.triplet_margin)
+        loss = self.mnloss(diffs, ys*self.config.margin)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss
 
-    def _rankingexp_step(self, batch, batch_idx):
+    def _l2dist_rankingexp_step(self, batch, batch_idx):
         ps, qs = self.network(batch['us'], batch['vs'])
         mask = (1.0 - torch.diag(batch['ys'])).bool() # mask for negative pairs
         logits = -(torch.cdist(ps.contiguous(), qs.contiguous(), p=2)**2)  # -||p-q||^2
@@ -487,7 +487,7 @@ class TwoTowerModel(pl.LightningModule):
         logits = ps @ qs.T
         diffs = logits - torch.diagonal(logits).reshape(-1, 1) # neg - pos
         diffs = torch.masked_select(diffs, mask)
-        loss = torch.maximum(diffs + self.config.triplet_margin, torch.zeros_like(diffs)).sum()
+        loss = torch.maximum(diffs + self.config.margin, torch.zeros_like(diffs)).sum()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         self._tb_log(ps.detach(), qs.detach())
         return loss

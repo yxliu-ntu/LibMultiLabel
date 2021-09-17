@@ -98,14 +98,21 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            'Minibatch', 'RankingMSE',
-                            'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
-                            'DPR-L1Hinge', 'DPR-L2Hinge',
-                            'DPR-SQL2Hinge', 'DPR-L2HingeSQ',
-                            'DPR-MAEL1Hinge', 'DPR-L1HingeMAE', 'DPR-L1HingeSQ',
-                            'DPR-DualMAE', 'DPR-DualMSE',
-                            'DPR-L2Dist','DPR-L2Dist-Var','DPR-L2Dist-Exp',
-                            'DPR-LRSQ', 'DPR-LRLR', 'DPR-Cosine', 'DPR',
+                            #'Minibatch',
+                            #'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
+                            'DPR',
+                            'DPR-RankingMSE', 'DPR-Triplet',
+                            'DPR-L1HL1H', 'DPR-L2HL2H',
+                            'DPR-L1HSQ', 'DPR-L2HSQ',
+                            'DPR-LRSQ', 'DPR-LRLR',
+                            'DPR-Cosine',
+                            #'DPR-SQL2H', 'DPR-MAEL1H', 'DPR-L1HMAE',
+                            #'DPR-MAEMAE', 'DPR-MSEMSE',
+                            'DPR-L2Dist',
+                            'DPR-L2Dist-RankingExp',
+                            'DPR-L2Dist-Var1', 'DPR-L2Dist-Var2',
+                            'DPR-L2Dist-Exp1', 'DPR-L2Dist-Exp2',
+                            'DPR-L2Dist-L1H', 'DPR-L2Dist-L2H',
                             ], default='DPR',
                         help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
@@ -116,8 +123,8 @@ def get_config():
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
-    parser.add_argument('--triplet_margin', type=float, default=1.0,
-                        help='the value of margin in the Triplet loss')
+    parser.add_argument('--margin', type=float, default=1.0,
+                        help='the value of margin in ranking losses')
 
     # model
     parser.add_argument('--model_name', default='KimCNN',

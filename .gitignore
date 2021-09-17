@@ -19,7 +19,9 @@ lib64/
 parts/
 sdist/
 var/
+others/
 runs/
+tfboard_logs/
 wheels/
 prof/
 pip-wheel-metadata/

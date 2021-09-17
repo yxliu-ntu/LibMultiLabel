@@ -18,16 +18,16 @@ do
         #for seed in 1331 1333 1335 1337 1339
         for seed in 1339
         do
-            for omega in 1.0 #0.0625 0.00390625 0.000244140625
+            for omega in 1.0
             do
-                for r in 1 2 4 8 16 32 64 128
+                for m in 1 2 4 8 16 32 64 128
                 do
                     cmd="${train_cmd} --learning_rate ${lr}"
                     #cmd="${cmd} --bratio ${br}"
                     cmd="${cmd} --bsize_i ${br} --bsize_j ${br}"
                     cmd="${cmd} --weight_decay ${wd}"
                     cmd="${cmd} --omega ${omega}"
-                    cmd="${cmd} --triplet_margin ${r}"
+                    cmd="${cmd} --margin ${m}"
                     cmd="${cmd} --seed ${seed}"
                     echo "${cmd}"
                 done
