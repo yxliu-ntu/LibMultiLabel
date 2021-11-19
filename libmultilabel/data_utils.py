@@ -62,13 +62,13 @@ def generate_batch_cross(data_batch):
     else:
         vs = None
     return {
-        'U': pad_sequence(us, batch_first=True) if us is not None else None,
-        'V': pad_sequence(vs, batch_first=True) if vs is not None else None,
-        'A':  torch.FloatTensor(data['_as']) if us is not None else None,
-        'B':  torch.FloatTensor(data['_bs']) if vs is not None else None,
-        'Ab': torch.FloatTensor(data['_abs']) if us is not None else None,
-        'Bb': torch.FloatTensor(data['_bbs']) if vs is not None else None,
-        'Y': _spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
+        'us': pad_sequence(us, batch_first=True) if us is not None else None,
+        'vs': pad_sequence(vs, batch_first=True) if vs is not None else None,
+        '_as':  torch.FloatTensor(data['_as']) if us is not None else None,
+        '_bs':  torch.FloatTensor(data['_bs']) if vs is not None else None,
+        '_abs': torch.FloatTensor(data['_abs']) if us is not None else None,
+        '_bbs': torch.FloatTensor(data['_bbs']) if vs is not None else None,
+        'ys': _spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
     }
 
 def _spmtx2tensor(spmtx):

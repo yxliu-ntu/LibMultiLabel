@@ -15,7 +15,6 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from pytorch_lightning import loggers as pl_loggers
 
 from libmultilabel import data_utils, MNLoss
-from libmultilabel.model import Model
 from libmultilabel.two_tower_model import TwoTowerModel
 from libmultilabel.utils import Timer, dump_log, init_device, set_seed
 
@@ -23,7 +22,7 @@ from libmultilabel.utils import Timer, dump_log, init_device, set_seed
 def get_config():
     parser = argparse.ArgumentParser(
         add_help=False,
-        description='multi-label learning for text classification')
+        description='Extreme similarity learning')
 
     # load params from config file
     parser.add_argument('-c', '--config', help='Path to configuration file')
@@ -34,15 +33,15 @@ def get_config():
             config = yaml.load(fp, Loader=yaml.SafeLoader)
 
     # path / directory
-    parser.add_argument('--data_dir', default='./data/dpr',
+    parser.add_argument('--data_dir', default='./data/ml-1m/',
                         help='The directory to load data (default: %(default)s)')
     parser.add_argument('--result_dir', default='./runs',
                         help='The directory to save checkpoints and logs (default: %(default)s)')
-    parser.add_argument('--tfboard_log_dir', default='./tfboard_logs',
-                        help='The directory to save tensorboard logs (default: %(default)s)')
+    #parser.add_argument('--tfboard_log_dir', default='./tfboard_logs',
+    #                    help='The directory to save tensorboard logs (default: %(default)s)')
 
     # data
-    parser.add_argument('--data_name', default='rcv1',
+    parser.add_argument('--data_name', default='ml-1m',
                         help='Dataset name (default: %(default)s)')
     parser.add_argument('--trainL_path',
                         help='Path to training data (default: [data_dir]/trainL.csv)')
@@ -56,33 +55,27 @@ def get_config():
                         help='Path to test data (default: [data_dir]/testL.csv)')
     parser.add_argument('--testR_path',
                         help='Path to test data (default: [data_dir]/testR.csv)')
-    parser.add_argument('--bert_path',
-                        help='Path to test data')
     #parser.add_argument('--val_size', type=float, default=0.2,
     #                    help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
-    #parser.add_argument('--min_vocab_freq', type=int, default=1,
-    #                    help='The minimum frequency needed to include a token in the vocabulary (default: %(default)s)')
-    parser.add_argument('--max_seq_len', type=int, default=256,
-                        help='The maximum number of tokens of a sample (default: %(default)s)')
     parser.add_argument('--shuffle', type=bool, default=True,
                         help='Whether to shuffle training data before each epoch (default: %(default)s)')
-    parser.add_argument('--drop_last', type=bool, default=False,
-                        help='Whether to drop the last batch each epoch (default: %(default)s)')
+    #parser.add_argument('--drop_last', type=bool, default=False,
+    #                    help='Whether to drop the last batch each epoch (default: %(default)s)')
 
     # train
     parser.add_argument('--seed', type=int,
                         help='Random seed (default: %(default)s)')
     parser.add_argument('--epochs', type=int, default=10000,
                         help='Number of epochs to train (default: %(default)s)')
-    parser.add_argument('--warmup_steps', type=int, default=0.0,
-                        help='Number of warm-up steps for training (default: %(default)s)')
+    #parser.add_argument('--warmup_steps', type=int, default=0.0,
+    #                    help='Number of warm-up steps for training (default: %(default)s)')
     parser.add_argument('--bratio', type=float, default=None,
                         help='batch ratio of training samples for Sogram (default: %(default)s)')
     parser.add_argument('--bsize_i', type=int, default=16,
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
-    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adamw-dpr', 'adagrad'],
+    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adagrad'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
                         help='Learning rate for optimizer (default: %(default)s)')
@@ -98,36 +91,23 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            #'Minibatch',
-                            #'Sogram', 'Sogram-Cosine', 'Sogram-Scale',
-                            'DPR',
-                            'DPR-RankingMSE', 'DPR-Triplet',
-                            'DPR-L1HL1H', 'DPR-L2HL2H',
-                            'DPR-L1HSQ', 'DPR-L2HSQ',
-                            'DPR-LRSQ', 'DPR-LRLR',
-                            #'DPR-Cosine',
-                            #'DPR-SQL2H', 'DPR-MAEL1H', 'DPR-L1HMAE',
-                            #'DPR-MAEMAE', 'DPR-MSEMSE',
-                            'DPR-L2Dist',
-                            'DPR-L2Dist-RankingExp',
-                            'DPR-L2Dist-Var1', 'DPR-L2Dist-Var2',
-                            'DPR-L2Dist-Exp1', 'DPR-L2Dist-Exp2',
-                            'DPR-L2Dist-L1H', 'DPR-L2Dist-L2H',
-                            ], default=None,
-                        help='Type of loss function. Except for Ori-LRLR, the others only support two-tower models.')
+                            'Naive-LogSoftmax',
+                            'Naive-LRLR',
+                            'Naive-LRSQ',
+                            'Minibatch-LRSQ',
+                            'Sogram-LRSQ',
+                            ], 
+                        default=None,
+                        help='Type of loss function. All only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
                         help='Cost weight for the negative part of the loss function')
-    parser.add_argument('--nu', type=float, default=1.0,
-                        help='Weight of Gaussian Kernel')
     parser.add_argument('--alpha', type=float, default=1.0,
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
-    parser.add_argument('--margin', type=float, default=1.0,
-                        help='the value of margin in ranking losses')
 
     # model
-    parser.add_argument('--model_name', default='KimCNN',
+    parser.add_argument('--model_name', default='ffm',
                         help='Model to be used (default: %(default)s)')
     parser.add_argument('--init_weight', default='kaiming_uniform',
                         help='Weight initialization to be used (default: %(default)s)')
@@ -139,24 +119,8 @@ def get_config():
                         help='embedding dimension for imputed vectors')
     parser.add_argument('--pad_id', type=int, default=0,
                         help='pad id for bert model')
-    #parser.add_argument('--num_filter_per_size', type=int, default=128,
-    #                    help='Number of filters in convolutional layers in each size (default: %(default)s)')
-    #parser.add_argument('--filter_sizes', type=int, nargs='+',
-    #                    default=[4], help='Size of convolutional filters (default: %(default)s)')
     parser.add_argument('--dropout', type=float, default=0.2,
                         help='Optional specification of dropout (default: %(default)s)')
-    #parser.add_argument('--dropout2', type=float, default=0.2,
-    #                    help='Optional specification of the second dropout (default: %(default)s)')
-    #parser.add_argument('--num_pool', type=int, default=1,
-    #                    help='Number of pool for dynamic max-pooling (default: %(default)s)')
-    parser.add_argument('--projection_dim', type=int, default=0,
-                        help='embedding dimension for each tower after projection')
-    parser.add_argument('--fix_q_encoder', action='store_true',
-                        help='freeze encoder of query')
-    parser.add_argument('--fix_ctx_encoder', action='store_true',
-                        help='freeze encoder of context')
-    parser.add_argument('--without_pretrained', action='store_true',
-                        help='load Bert models without pretrained weights')
 
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,
@@ -170,14 +134,6 @@ def get_config():
     parser.add_argument('--val_metric', default='P@1',
                         help='The metric to monitor for early stopping (default: %(default)s)')
 
-    ## pretrained vocab / embeddings
-    #parser.add_argument('--vocab_file', type=str,
-    #                    help='Path to a file holding vocabuaries (default: %(default)s)')
-    #parser.add_argument('--embed_file', type=str,
-    #                    help='Path to a file holding pre-trained embeddings (default: %(default)s)')
-    #parser.add_argument('--label_file', type=str,
-    #                    help='Path to a file holding all labels (default: %(default)s)')
-
     ## log
     #parser.add_argument('--save_k_predictions', type=int, nargs='?', const=100, default=0,
     #                    help='Save top k predictions on test set. k=%(const)s if not specified. (default: %(default)s)')
@@ -189,12 +145,8 @@ def get_config():
                         help='Disable CUDA')
     parser.add_argument('--silent', action='store_true',
                         help='Enable silent mode')
-    #parser.add_argument('--eval_sqrt_mode', action='store_true',
-    #                    help='evaluate model every sqrt(len(dataloader)) steps')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Use multi-cpu core for data pre-processing (default: %(default)s)')
-    #parser.add_argument('--embed_cache_dir', type=str,
-    #                    help='For parameter search only: path to a directory for storing embeddings for multiple runs. (default: %(default)s)')
     parser.add_argument('--eval', action='store_true',
                         help='Only run evaluation on the test set (default: %(default)s)')
     parser.add_argument('--checkpoint_path',
@@ -205,28 +157,15 @@ def get_config():
     args = parser.parse_args()
     config = AttributeDict(vars(args))
 
-    for i in ['trainL', 'trainR', 'validL', 'validR', 'testL', 'testR']:
-        if config['%s_path'%i] is None:
-            config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
-    config['dataset_type'] = 'cross' if 'Minibatch' in config.loss else 'nonzero'
+    #for i in ['trainL', 'trainR', 'validL', 'validR', 'testL', 'testR']:
+    #    if config['%s_path'%i] is None:
+    #        config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
+    config['dataset_type'] = 'nonzero' if 'Sogram' in config.loss else 'cross'
     return config
 
-
-#def save_predictions(trainer, model, dataloader, predict_out_path):
-#    batch_predictions = trainer.predict(model, dataloaders=dataloader)
-#    pred_labels = np.vstack([batch['top_k_pred'] for batch in batch_predictions])
-#    pred_scores = np.vstack([batch['top_k_pred_scores'] for batch in batch_predictions])
-#    with open(predict_out_path, 'w') as fp:
-#        for pred_label, pred_score in zip(pred_labels, pred_scores):
-#            out_str = ' '.join([f'{model.classes[label]}:{score:.4}' for label, score in zip(pred_label, pred_score)])
-#            fp.write(out_str+'\n')
-#    logging.info(f'Saved predictions to: {predict_out_path}')
-
-def data_proc(x, max_seq_len):
-    x = [int(i.split(':')[0]) for i in x.split(',')]
-    x = [101] + x + [102] + [0]*(max_seq_len-len(x)-3) + [102]
+def data_proc(x):
+    x = [int(i.split(':')[0]) for i in x.split()]
     return x
-
 
 def setup_loggers(log_path:str, is_silent: bool):
     logging.basicConfig(
@@ -247,6 +186,7 @@ def setup_loggers(log_path:str, is_silent: bool):
     return
 
 def main():
+    ## Load config
     config = get_config()
     set_seed(seed=config.seed)
 
@@ -260,6 +200,7 @@ def main():
     )
     config['is_sogram'] = 'Sogram' in config.loss
 
+    ## Build model, set logger and checkpoint
     _Model = TwoTowerModel
     checkpoint_dir = os.path.join(config.result_dir, config.run_name)
     checkpoint_callback = ModelCheckpoint(
@@ -278,14 +219,13 @@ def main():
     #tb_logger = pl_loggers.TensorBoardLogger(config.tfboard_log_dir, name=config.run_name)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
+    ## Set dataloader
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
-            partial(data_proc, max_seq_len=config.max_seq_len),
-            partial(data_proc, max_seq_len=config.max_seq_len),
-            #lambda x: [int(i.split(':')[0])+1 for i in x.split(',')], # idx 0 reserved for padding,
-            #lambda x: [int(i.split(':')[0])+1 for i in x.split(',')],
+            data_proc,
+            data_proc,
             data_utils.generate_batch_cross,
-            data_utils.generate_batch_nonzero if not config['is_sogram'] else data_utils.generate_batch_sogram,
+            data_utils.generate_batch_sogram,
             )
     dataloaders = dataloader_factory.get_loaders()
     train_loader = dataloaders['train']

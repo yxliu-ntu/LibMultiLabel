@@ -21,17 +21,13 @@ class FM2Tower(torch.nn.Module):
     def __init__(self, config, D_u=6038, D_v=3514):
         super().__init__()
         self.config = config
-        #self.net_u = FeaturesEmbedding(D_u, self.k)
-        #self.net_v = FeaturesEmbedding(D_v, self.k)
         self.net_u = torch.nn.Embedding(D_u, self.config.k, padding_idx=0)
         self.net_v = torch.nn.Embedding(D_v, self.config.k, padding_idx=0)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        #torch.nn.init.kaiming_uniform_(self.net_u.weight)
-        #torch.nn.init.kaiming_uniform_(self.net_v.weight)
-        torch.nn.init.constant_(self.net_u.weight, 0.1)
-        torch.nn.init.constant_(self.net_v.weight, 0.1)
+        torch.nn.init.kaiming_uniform_(self.net_u.weight)
+        torch.nn.init.kaiming_uniform_(self.net_v.weight)
 
     def _cal_output(self, inp, inp_placeholder):
         """
@@ -39,7 +35,6 @@ class FM2Tower(torch.nn.Module):
         :param inp_placeholder: torch.nn.Module class``
         :output: Float tensor of size ``(batch_size, k)``
         """
-        #output_mat = inp_placeholder(inp)
         output_mat = inp_placeholder(inp)
         return output_mat
 

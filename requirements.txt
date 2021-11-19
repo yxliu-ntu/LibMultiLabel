@@ -1,4 +1,5 @@
 nltk
+wheel
 ipython
 pandas
 PyYAML

@@ -1,12 +1,6 @@
 import torch.nn as nn
 
-from .caml import CAML
-from .kim_cnn import KimCNN
-from .kim_cnn_2tower import KimCNN2Tower
-from .xml_cnn import XMLCNN
-from .bert import Bert2Tower
 from .ffm import FM2Tower
-
 
 def get_init_weight_func(config):
     def init_weight(m):
