@@ -40,6 +40,10 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
             self.step = self._logsoftmax_step
+        elif self.config.loss == 'Linear-LR':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = torch.nn.BCEWithLogitsLoss(reduction='sum')
+            self.step = self._linearlr_step
         elif self.config.loss == 'Naive-LRLR':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
@@ -74,10 +78,9 @@ class TwoTowerModel(pl.LightningModule):
         else:
             raise
 
-    def _embedding_norm(self, x):
-        x_norm = torch.norm(x, dim=1, keepdim=True).detach()
-        x = x/x_norm
-        return x
+    def _l2norm(self, x):
+        x_norm = torch.norm(x, p=2, dim=-1, keepdim=True).detach()
+        return torch.div(x, x_norm)
 
     def configure_optimizers(self):
         """
@@ -114,6 +117,16 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
+    def _l2_reg(self, l2_lambda):
+        l2_reg = torch.tensor(0.)
+        if l2_lambda > 0:
+            for param in self.parameters():
+                if param.requires_grad:
+                    l2_reg += torch.norm(param)**2
+            return 0.5 * l2_lambda * l2_reg
+        else:
+            return 0.0
+
     def _logsoftmax_step(self, batch, batch_idx):
         raise NotImplementedError
         #ps, qs = self.network(batch['us'], batch['vs'])
@@ -124,38 +137,64 @@ class TwoTowerModel(pl.LightningModule):
         #return loss
 
     def _lrlrsq_step(self, batch, batch_idx):
-        ps, qs = self.network(batch['us'], batch['vs'])
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        ys = batch['ys'] #dense_to_sparse(torch.diag(batch['ys']).detach())
-        _as = batch['_as']
-        _bs = batch['_bs']
-        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        return loss
+        raise NotImplementedError
+        #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
+        #pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        #qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        #ys = batch['ys'] #dense_to_sparse(torch.diag(batch['ys']).detach())
+        #_as = batch['_as']
+        #_bs = batch['_bs']
+        #loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
+        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #return loss
 
     def _sogram_step(self, batch, batch_idx):
-        ps, qs = self.network(batch['us'], batch['vs'])
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        ys = batch['ys']
-        _as = batch['_as']
-        _bs = batch['_bs']
-        _abs = batch['_abs']
-        _bbs = batch['_bbs']
-        loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+        raise NotImplementedError
+        #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
+        #pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        #qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        #ys = batch['ys']
+        #_as = batch['_as']
+        #_bs = batch['_bs']
+        #_abs = batch['_abs']
+        #_bbs = batch['_bbs']
+        #loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #return loss
+
+    def _linearlr_step(self, batch, batch_idx):
+        us, vs, uvals, vvals = batch['us'], batch['vs'], batch['uvals'], batch['vvals']
+        P, Q = self.network(us, vs, uvals, vvals)
+        pqs = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1) # outer sum
+        if self.config.isl2norm:
+            pq_norms = uvals.sum(dim=-1, keepdim=True) + vvals.sum(dim=-1) # outer sum
+            pq_norms = pq_norms ** 0.5
+            logits = torch.div(pqs, pq_norms.detach())
+        Y = batch['ys'].to_dense()
+        loss = self.mnloss(logits, Y) + self._l2_reg(self.config.l2_lambda)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def _minibatch_step(self, batch, batch_idx):
-        P, Q = self.network(batch['us'], batch['vs'])
+        #print(batch['us'][:10, :], batch['vs'][:10, :], batch['uvals'][:10, :], batch['vvals'][:10, :])
+        #print(batch['us'].shape, batch['vs'].shape, batch['uvals'].shape, batch['vvals'].shape)
+        #print(batch['us'].sum(), batch['vs'].sum(), batch['uvals'].sum(), batch['vvals'].sum())
+        us, vs, uvals, vvals = batch['us'], batch['vs'], batch['uvals'], batch['vvals']
+        if self.config.isl2norm:
+            uvals = self._l2norm(uvals)
+            vvals = self._l2norm(vvals)
+        P, Q = self.network(us, vs, uvals, vvals)
+        print(P.shape, Q.shape)
+        print(P.sum(), Q.sum())
         Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         Y = batch['ys']
-        A = batch['as']
-        B = batch['bs']
-        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
+        A = batch['_as']
+        B = batch['_bs']
+        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + self._l2_reg(self.config.l2_lambda)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -181,7 +220,7 @@ class TwoTowerModel(pl.LightningModule):
         return self._shared_eval_epoch_end(step_outputs, 'test')
 
     def _shared_eval_step(self, batch, batch_idx):
-        P, Q = self.network(batch['us'], batch['vs'])
+        P, Q = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
         return {
                 'P': P.detach().cpu().numpy() if P is not None else None, 
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,

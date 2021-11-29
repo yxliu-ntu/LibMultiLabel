@@ -75,12 +75,14 @@ def get_config():
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
-    parser.add_argument('--optimizer', default='adam', choices=['adam', 'sgd', 'adamw', 'adagrad'],
+    parser.add_argument('--optimizer', default='adagrad', choices=['adam', 'sgd', 'adamw', 'adagrad'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
                         help='Learning rate for optimizer (default: %(default)s)')
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='Weight decay factor (default: %(default)s)')
+    parser.add_argument('--l2_lambda', type=float, default=0,
+                        help='L2 regularization factor (default: %(default)s)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='Momentum factor for SGD only (default: %(default)s)')
     parser.add_argument('--patience', type=int, default=5,
@@ -94,6 +96,7 @@ def get_config():
                             'Naive-LogSoftmax',
                             'Naive-LRLR',
                             'Naive-LRSQ',
+                            'Linear-LR',
                             'Minibatch-LRSQ',
                             'Sogram-LRSQ',
                             ], 
@@ -121,6 +124,8 @@ def get_config():
                         help='pad id for bert model')
     parser.add_argument('--dropout', type=float, default=0.2,
                         help='Optional specification of dropout (default: %(default)s)')
+    parser.add_argument('--isl2norm', action='store_true',
+                        help='l2-normalize features by sample')
 
     # eval
     parser.add_argument('--eval_bsize_i', type=int, default=512,
@@ -164,8 +169,9 @@ def get_config():
     return config
 
 def data_proc(x):
-    x = [int(i.split(':')[0]) for i in x.split()]
-    return x
+    x = [(int(i.split(':')[0]), float(i.split(':')[1])) for i in x.split()]
+    idx, val = zip(*x)
+    return idx, val
 
 def setup_loggers(log_path:str, is_silent: bool):
     logging.basicConfig(
@@ -220,12 +226,14 @@ def main():
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     ## Set dataloader
+    rng = np.random.default_rng(seed=1024) # for code testing
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
             data_proc,
             data_proc,
             data_utils.generate_batch_cross,
             data_utils.generate_batch_sogram,
+            rng=rng,
             )
     dataloaders = dataloader_factory.get_loaders()
     train_loader = dataloaders['train']
@@ -235,13 +243,18 @@ def main():
     config['nnz'] = train_loader.dataset.nnz
     config['M'] = train_loader.dataset.M
     config['N'] = train_loader.dataset.N
+    config['Du'] = max(max(train_loader.dataset.U, key=lambda x: max(x[0]))[0]) + 1
+    config['Dv'] = max(max(train_loader.dataset.V, key=lambda x: max(x[0]))[0]) + 1
+    print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
-    if 'Sogram' in config.loss:
-        val_check_interval = int(np.sqrt(len(train_loader)))
-        config['total_steps'] = config.epochs * len(train_loader)
-    else:
-        val_check_interval = len(train_loader)
-        config['total_steps'] = config.epochs * (val_check_interval**2)
+    val_check_interval = len(train_loader)
+    config['total_steps'] = config.epochs * len(train_loader)
+    #if 'Sogram' in config.loss:
+    #    val_check_interval = int(np.sqrt(len(train_loader)))
+    #    config['total_steps'] = config.epochs * len(train_loader)
+    #else:
+    #    val_check_interval = len(train_loader)
+    #    config['total_steps'] = config.epochs * (val_check_interval**2)
     trainer = pl.Trainer(
             logger=False,
             #logger=tb_logger,
@@ -277,7 +290,7 @@ def main():
                     Y_eval=valid_loader.dataset.Yu,
                     )
 
-        trainer.fit(model, train_loader, valid_loader)
+        trainer.fit(model, train_loader)#, valid_loader)
 
 
     if test_loader is not None:

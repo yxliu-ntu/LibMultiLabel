@@ -25,6 +25,7 @@ def newtokenize(text, word_dict, max_seq_length):
     return [word_dict[t.lower()] for t in tokenizer.tokenize(text) if not t.isnumeric()][:max_seq_length]
 
 def generate_batch_sogram(data_batch):
+    raise NotImplementedError
     data = data_batch[0]
     us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['u']]
     vs = [torch.LongTensor(v) for v in data['v']]
@@ -38,32 +39,24 @@ def generate_batch_sogram(data_batch):
         'ys': torch.FloatTensor(data['y'].A1.ravel()),
     }
 
-def generate_batch_nonzero(data_batch):
-    us = [torch.LongTensor(data['u']) if isinstance(data['u'], list) else torch.LongTensor(data['u'].tolist()) for data in data_batch]
-    vs = [torch.LongTensor(data['v']) for data in data_batch]
-    return {
-        'us': pad_sequence(us, batch_first=True),
-        'vs': pad_sequence(vs, batch_first=True),
-        '_as':  torch.FloatTensor([data['_a'] for data in data_batch]),
-        '_bs':  torch.FloatTensor([data['_b'] for data in data_batch]),
-        '_abs': torch.FloatTensor([data['_ab'] for data in data_batch]),
-        '_bbs': torch.FloatTensor([data['_bb'] for data in data_batch]),
-        'ys': torch.FloatTensor([data['y'] for data in data_batch]),
-    }
-
 def generate_batch_cross(data_batch):
     data = data_batch[0]
-    if data['us'] is not None:
-        us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['us']]
-    else:
-        us = None
-    if data['vs'] is not None:
-        vs = [torch.LongTensor(v) for v in data['vs']]
-    else:
-        vs = None
+    def _helper(feat):
+        if feat is not None:
+            feat = feat.tolist()
+            fs, fvals = zip(*feat)
+            fs = [torch.LongTensor(f) for f in fs]
+            fvals = [torch.FloatTensor(fval) for fval in fvals]
+        else:
+            fs, fvals = None, None
+        return fs, fvals
+    us, uvals = _helper(data['us'])
+    vs, vvals = _helper(data['vs'])
     return {
         'us': pad_sequence(us, batch_first=True) if us is not None else None,
         'vs': pad_sequence(vs, batch_first=True) if vs is not None else None,
+        'uvals': pad_sequence(uvals, batch_first=True) if us is not None else None,
+        'vvals': pad_sequence(vvals, batch_first=True) if vs is not None else None,
         '_as':  torch.FloatTensor(data['_as']) if us is not None else None,
         '_bs':  torch.FloatTensor(data['_bs']) if vs is not None else None,
         '_abs': torch.FloatTensor(data['_abs']) if us is not None else None,

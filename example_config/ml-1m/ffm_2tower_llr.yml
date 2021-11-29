@@ -1,7 +1,7 @@
 # data
 data_name: ml-1m
 data_dir: data/ml-1m/mf_format/
-trainL_path: data/ml-1m/mf_format/tr
+trainL_path: data/ml-1m/mf_format/tr.small
 trainR_path: data/ml-1m/mf_format/item
 validL_path: data/ml-1m/mf_format/va
 validR_path: data/ml-1m/mf_format/item
@@ -9,9 +9,9 @@ testL_path: data/ml-1m/mf_format/te
 testR_path: data/ml-1m/mf_format/item
 
 # train
-shuffle: True 
+shuffle: False
 optimizer: adagrad
-patience: 50
+patience: 1000000
 gradient_clip_val: 0.0
 gradient_clip_algorithm: norm
 
