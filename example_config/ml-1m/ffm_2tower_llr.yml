@@ -1,7 +1,7 @@
 # data
 data_name: ml-1m
 data_dir: data/ml-1m/mf_format/
-trainL_path: data/ml-1m/mf_format/tr.small
+trainL_path: data/ml-1m/mf_format/tr #.small
 trainR_path: data/ml-1m/mf_format/item
 validL_path: data/ml-1m/mf_format/va
 validR_path: data/ml-1m/mf_format/item
@@ -11,17 +11,17 @@ testR_path: data/ml-1m/mf_format/item
 # train
 shuffle: False
 optimizer: adagrad
-patience: 1000000
+patience: 100 #0000
 gradient_clip_val: 0.0
 gradient_clip_algorithm: norm
 
 # eval
 eval_bsize_i: 4096
 monitor_metrics: [P@1, P@2, P@3, P@4, P@5]
-val_metric: P@1
+val_metric: P@5
 
 # model
-model_name: FM2Tower
+model_name: Linear
 drop_last: False
 dropout: 0.0
 k1: 4

@@ -148,6 +148,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--check_func_val', action='store_true',
+                        help='Check function value when training')
     parser.add_argument('--silent', action='store_true',
                         help='Enable silent mode')
     parser.add_argument('--num_workers', type=int, default=4,
@@ -167,11 +169,6 @@ def get_config():
     #        config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
     config['dataset_type'] = 'nonzero' if 'Sogram' in config.loss else 'cross'
     return config
-
-def data_proc(x):
-    x = [(int(i.split(':')[0]), float(i.split(':')[1])) for i in x.split()]
-    idx, val = zip(*x)
-    return idx, val
 
 def setup_loggers(log_path:str, is_silent: bool):
     logging.basicConfig(
@@ -226,11 +223,11 @@ def main():
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     ## Set dataloader
-    rng = np.random.default_rng(seed=1024) # for code testing
+    rng = np.random.default_rng(seed=1024) # CT, for code testing
     dataloader_factory = MNLoss.DataloaderFactory(
             config,
-            data_proc,
-            data_proc,
+            data_utils.svm_data_proc,
+            data_utils.svm_data_proc,
             data_utils.generate_batch_cross,
             data_utils.generate_batch_sogram,
             rng=rng,
@@ -240,21 +237,19 @@ def main():
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
     assert valid_loader is not None
+    for loader in dataloaders:
+        loader = dataloaders[loader]
+        loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U)
+        loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V)
     config['nnz'] = train_loader.dataset.nnz
-    config['M'] = train_loader.dataset.M
-    config['N'] = train_loader.dataset.N
-    config['Du'] = max(max(train_loader.dataset.U, key=lambda x: max(x[0]))[0]) + 1
-    config['Dv'] = max(max(train_loader.dataset.V, key=lambda x: max(x[0]))[0]) + 1
+    config['M'] = train_loader.dataset.U.shape[0]
+    config['N'] = train_loader.dataset.V.shape[0]
+    config['Du'] = train_loader.dataset.U.shape[1]
+    config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
     val_check_interval = len(train_loader)
     config['total_steps'] = config.epochs * len(train_loader)
-    #if 'Sogram' in config.loss:
-    #    val_check_interval = int(np.sqrt(len(train_loader)))
-    #    config['total_steps'] = config.epochs * len(train_loader)
-    #else:
-    #    val_check_interval = len(train_loader)
-    #    config['total_steps'] = config.epochs * (val_check_interval**2)
     trainer = pl.Trainer(
             logger=False,
             #logger=tb_logger,
@@ -290,7 +285,7 @@ def main():
                     Y_eval=valid_loader.dataset.Yu,
                     )
 
-        trainer.fit(model, train_loader)#, valid_loader)
+        trainer.fit(model, train_loader, valid_loader)
 
 
     if test_loader is not None:

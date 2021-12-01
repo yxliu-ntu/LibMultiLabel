@@ -6,17 +6,19 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+
 from abc import abstractmethod
 from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_lightning.utilities.parsing import AttributeDict
-
 from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
 from .utils import dump_log, argsort_top_k, dense_to_sparse
+from .data_utils import spmtx2tensor
 from scipy.spatial.distance import cdist
+from sklearn.preprocessing import normalize
 
 
 class TwoTowerModel(pl.LightningModule):
@@ -42,7 +44,7 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._logsoftmax_step
         elif self.config.loss == 'Linear-LR':
             logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = torch.nn.BCEWithLogitsLoss(reduction='sum')
+            self.mnloss = self._weighted_lrloss
             self.step = self._linearlr_step
         elif self.config.loss == 'Naive-LRLR':
             logging.info(f'loss_type: {self.config.loss}')
@@ -77,10 +79,6 @@ class TwoTowerModel(pl.LightningModule):
             self.step = self._sogram_step
         else:
             raise
-
-    def _l2norm(self, x):
-        x_norm = torch.norm(x, p=2, dim=-1, keepdim=True).detach()
-        return torch.div(x, x_norm)
 
     def configure_optimizers(self):
         """
@@ -162,40 +160,89 @@ class TwoTowerModel(pl.LightningModule):
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
 
+    def _weighted_lrloss(self, logits, Y):
+        _lrloss = F.binary_cross_entropy_with_logits
+        coos = Y._indices()
+        logits_pos = logits[coos[0], coos[1]]
+        L_plus_part1 = _lrloss(logits_pos, (Y._values() > 0).to(logits_pos.dtype), reduction='none')
+        L_plus_part2 = _lrloss(logits_pos, logits_pos.new_zeros(logits_pos.size()), reduction='none')
+        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
+        L_minus = _lrloss(logits, logits.new_zeros(logits.size()), reduction='none')
+        return L_plus.sum() + self.config.omega * L_minus.sum()
+
     def _linearlr_step(self, batch, batch_idx):
-        us, vs, uvals, vvals = batch['us'], batch['vs'], batch['uvals'], batch['vvals']
-        P, Q = self.network(us, vs, uvals, vvals)
-        pqs = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1) # outer sum
+        us, vs = batch['us'], batch['vs']
+        Y = batch['ys']
+
+        ps, us_norm_sq, qs, vs_norm_sq = self.network(us, vs)
+        logits = ps.sum(dim=-1, keepdim=True) + qs.sum(dim=-1) # outer sum
         if self.config.isl2norm:
-            pq_norms = uvals.sum(dim=-1, keepdim=True) + vvals.sum(dim=-1) # outer sum
-            pq_norms = pq_norms ** 0.5
-            logits = torch.div(pqs, pq_norms.detach())
-        Y = batch['ys'].to_dense()
+            uv_norm = (us_norm_sq.unsqueeze(dim=-1) + vs_norm_sq) ** 0.5 # outer sum
+            logits = torch.div(logits, uv_norm)
+
         loss = self.mnloss(logits, Y) + self._l2_reg(self.config.l2_lambda)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def _minibatch_step(self, batch, batch_idx):
-        #print(batch['us'][:10, :], batch['vs'][:10, :], batch['uvals'][:10, :], batch['vvals'][:10, :])
-        #print(batch['us'].shape, batch['vs'].shape, batch['uvals'].shape, batch['vvals'].shape)
-        #print(batch['us'].sum(), batch['vs'].sum(), batch['uvals'].sum(), batch['vvals'].sum())
-        us, vs, uvals, vvals = batch['us'], batch['vs'], batch['uvals'], batch['vvals']
-        if self.config.isl2norm:
-            uvals = self._l2norm(uvals)
-            vvals = self._l2norm(vvals)
-        P, Q = self.network(us, vs, uvals, vvals)
-        print(P.shape, Q.shape)
-        print(P.sum(), Q.sum())
-        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        us, vs = batch['us'], batch['vs']
         Y = batch['ys']
         A = batch['_as']
         B = batch['_bs']
+
+        P, Q = self.network(us, vs)
+        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + self._l2_reg(self.config.l2_lambda)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
+
+    def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
+        with torch.no_grad():
+            Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
+            Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
+            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
+            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+            Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
+            m, n = Utr.shape[0], Vtr.shape[0]
+            segment_m = math.ceil(m/bsize_i)
+            segment_n = math.ceil(n/bsize_j)
+
+            P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
+            if self.config.loss.startswith('Linear-LR'):
+                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
+            else:
+                P, Q = self.network(Utr, Vtr)
+                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+
+            for i in range(segment_m):
+                i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
+                logits = torch.zeros(i_end-i_start, n)
+                target = spmtx2tensor(Ytr[i_start:i_end])
+                for j in range(segment_n):
+                    j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
+                    if self.config.loss.startswith('Linear-LR'):
+                        logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
+                        if self.config.isl2norm:
+                            uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
+                            logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
+                        func_val = self.mnloss(logits, target) + self._l2_reg(self.config.l2_lambda)
+                    else:
+                        func_val = self.mnloss(
+                                target,
+                                Atr[i_start:i_end],
+                                Btr[j_start:j_end],
+                                P[i_start:i_end],
+                                Q[j_start:j_end],
+                                Pt[i_start:i_end],
+                                Qt[j_start:j_end]
+                                ) + self._l2_reg(self.config.l2_lambda)
+            print(f'epoch: {self.current_epoch}, func_val: {func_val.item()}')
+            logging.debug(f'epoch: {self.current_epoch}, func_val: {func_val.item()}')
+        return
 
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx)
@@ -220,21 +267,33 @@ class TwoTowerModel(pl.LightningModule):
         return self._shared_eval_epoch_end(step_outputs, 'test')
 
     def _shared_eval_step(self, batch, batch_idx):
-        P, Q = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
+        P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
+        if self.config.loss.startswith('Linear-LR'):
+            P, Unorm_sq, Q, Vnorm_sq = self.network(batch['us'], batch['vs'])
+        else:
+            P, Q = self.network(batch['us'], batch['vs'])
         return {
                 'P': P.detach().cpu().numpy() if P is not None else None, 
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,
+                'Unorm_sq': Unorm_sq.detach().cpu().numpy() if Unorm_sq is not None else None, 
+                'Vnorm_sq': Vnorm_sq.detach().cpu().numpy() if Vnorm_sq is not None else None,
                 }
 
     def _shared_eval_step_end(self, batch_parts):
-        P = batch_parts['P'] if batch_parts['P'] is not None else None
-        Q = batch_parts['Q'] if batch_parts['Q'] is not None else None
-        return P, Q
+        P = batch_parts['P']
+        Q = batch_parts['Q']
+        Unorm_sq = batch_parts['Unorm_sq']
+        Vnorm_sq = batch_parts['Vnorm_sq']
+        return P, Q, Unorm_sq, Vnorm_sq
 
     def _shared_eval_epoch_end(self, step_outputs, split):
-        P, Q = zip(*step_outputs)
+        P, Q, Unorm_sq, Vnorm_sq = zip(*step_outputs)
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
+        if self.config.loss.startswith('Linear-LR') and self.config.isl2norm:
+            Unorm_sq = np.vstack([_data for _data in Unorm_sq if _data is not None])
+            Vnorm_sq = np.vstack([_data for _data in Vnorm_sq if _data is not None])
+
         m, n = P.shape[0], Q.shape[0]
         bsize_i = self.config.eval_bsize_i
         bsize_j = self.config.eval_bsize_j if self.config.eval_bsize_j is not None else n
@@ -246,11 +305,20 @@ class TwoTowerModel(pl.LightningModule):
             target = self.Y_eval[i_start:i_end].todense()
             for j in range(segment_n):
                 j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
+                if self.config.loss.startswith('Linear-LR'):
+                    score_mat[:, j_start:j_end] = np.add.outer(P[i_start:i_end].sum(axis=-1), Q[j_start:j_end].sum(axis=-1))
+                    if self.config.isl2norm:
+                        uv_norm = np.add.outer(Unorm_sq[i_start:i_end].sum(axis=-1), Vnorm_sq[j_start:j_end].sum(axis=-1)) ** 0.5
+                        score_mat[:, j_start:j_end] = score_mat[:, j_start:j_end] / uv_norm
+                else:
+                    score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
             self.eval_metric.update(target, score_mat)
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
+
+        if self.config.check_func_val:
+            self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')

@@ -7,7 +7,7 @@ gpu=$3
 
 lr=1e-2
 epochs=3
-bs=1024
+#bs=1024
 k=256
 wd=0.0
 r=-1.0
@@ -25,6 +25,7 @@ train_cmd="${train_cmd} --weight_decay ${wd}"
 train_cmd="${train_cmd} --loss ${loss}"
 train_cmd="${train_cmd} --isl2norm"
 train_cmd="${train_cmd} --cpu"
+train_cmd="${train_cmd} --check_func_val"
 train_cmd="${train_cmd} --result_dir ./runs/"
 #train_cmd="${train_cmd} --tfboard_log_dir ./tfboard_logs/rerun"
 

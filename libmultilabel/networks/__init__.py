@@ -1,6 +1,7 @@
 import torch.nn as nn
 
 from .ffm import FM2Tower
+from .linear import Linear
 
 def get_init_weight_func(config):
     def init_weight(m):
