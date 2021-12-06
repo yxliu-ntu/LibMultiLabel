@@ -5,8 +5,8 @@ config=$1
 loss=$2
 gpu=$3
 
-lr=1e-2
-epochs=100 #000
+#lr=1e-2
+epochs=1000000
 omega=1
 #bs=1
 k=1
@@ -34,9 +34,9 @@ for seed in 1331 #1333 1335 1337 1339
 do
     cmd="${train_cmd} --seed ${seed}"
     if [[ "$loss" =~ ^(Linear-LR)$ ]]; then
-        for bs in 1 8 64 512 #0.25 1 2 4
+        for bs in 3660 #1 8 64 512 #0.25 1 2 4
         do
-            for lr in 1e-2 1e-3 1e-4
+            for lr in 1 #1e-2 #1e-3 1e-4
             do
                 cmd="${train_cmd} --seed ${seed}"
                 cmd="${cmd} --l2_lambda ${l}"

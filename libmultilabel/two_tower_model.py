@@ -50,6 +50,8 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
                     loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
                     )
             self.step = self._lrlrsq_step
@@ -57,6 +59,8 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
                     )
             self.step = self._lrlrsq_step
         elif self.config.loss == 'Minibatch-LRSQ':
@@ -128,21 +132,23 @@ class TwoTowerModel(pl.LightningModule):
     def _logsoftmax_step(self, batch, batch_idx):
         raise NotImplementedError
         #ps, qs = self.network(batch['us'], batch['vs'])
+        #amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
         #ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
         #logits = ps @ qs.T
-        #loss = self.mnloss(logits, ys)
+        #loss = amp*self.mnloss(logits, ys)
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
 
     def _lrlrsq_step(self, batch, batch_idx):
         raise NotImplementedError
         #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
+        #amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
         #pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         #qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         #ys = batch['ys'] #dense_to_sparse(torch.diag(batch['ys']).detach())
         #_as = batch['_as']
         #_bs = batch['_bs']
-        #loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
+        #loss = amp*self.mnloss(ys, _as, _bs, ps, qs, pts, qts)
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
 
@@ -180,7 +186,8 @@ class TwoTowerModel(pl.LightningModule):
             uv_norm = (us_norm_sq.unsqueeze(dim=-1) + vs_norm_sq) ** 0.5 # outer sum
             logits = torch.div(logits, uv_norm)
 
-        loss = self.mnloss(logits, Y) + self._l2_reg(self.config.l2_lambda)
+        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
+        loss = amp*self.mnloss(logits, Y) + self._l2_reg(self.config.l2_lambda)
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
