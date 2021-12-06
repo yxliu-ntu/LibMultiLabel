@@ -96,7 +96,7 @@ class TwoTowerModel(pl.LightningModule):
             optimizer = optim.SGD(parameters, self.config.learning_rate,
                                   momentum=self.config.momentum,
                                   weight_decay=self.config.weight_decay)
-            torch.nn.utils.clip_grad_value_(parameters, 0.5)
+            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adagrad':
             optimizer = optim.Adagrad(parameters,
                                    weight_decay=self.config.weight_decay,
@@ -107,12 +107,12 @@ class TwoTowerModel(pl.LightningModule):
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate)
-            torch.nn.utils.clip_grad_value_(parameters, 0.5)
+            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adamw':
             optimizer = optim.AdamW(parameters,
                                     weight_decay=self.config.weight_decay,
                                     lr=self.config.learning_rate)
-            torch.nn.utils.clip_grad_value_(parameters, 0.5)
+            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
         else:
             raise RuntimeError(
                 'Unsupported optimizer: {self.config.optimizer}')
@@ -247,8 +247,8 @@ class TwoTowerModel(pl.LightningModule):
                                 Pt[i_start:i_end],
                                 Qt[j_start:j_end]
                                 ) + self._l2_reg(self.config.l2_lambda)
-            print(f'epoch: {self.current_epoch}, func_val: {func_val.item()}')
-            logging.debug(f'epoch: {self.current_epoch}, func_val: {func_val.item()}')
+            print(f'epoch: {self.current_epoch}, func_val: {func_val.item():.4e}')
+            logging.debug(f'epoch: {self.current_epoch}, func_val: {func_val.item():.4e}')
         return
 
     def training_step(self, batch, batch_idx):

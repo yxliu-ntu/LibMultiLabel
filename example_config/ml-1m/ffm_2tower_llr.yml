@@ -10,7 +10,6 @@ testR_path: data/ml-1m/mf_format/item
 
 # train
 shuffle: False
-optimizer: adagrad
 patience: 1000000
 gradient_clip_val: 0.0
 gradient_clip_algorithm: norm
