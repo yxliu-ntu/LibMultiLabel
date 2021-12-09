@@ -5,20 +5,19 @@ config=$1
 loss=$2
 gpu=$3
 
-solver="adagrad"
-lr=1e-2
-epochs=100
-br=1e-2
+solver="sgd"
+#lr=1e-2
+epochs=10000000
+omega=1
+#bs=1
 k=1
-#omega=1
-#l=1
+l=1
 m=0
 wd=0.0
 
 task(){
 # Set up train command
-#train_cmd="CUDA_VISIBLE_DEVICES=$gpu python3 main.py"
-train_cmd="python3 main.py"
+train_cmd="CUDA_VISIBLE_DEVICES=$gpu python3 main.py"
 train_cmd="${train_cmd} --optimizer $solver"
 train_cmd="${train_cmd} --config ${config}"
 #train_cmd="${train_cmd} --learning_rate ${lr}"
@@ -39,15 +38,14 @@ for seed in 1331 #1333 1335 1337 1339
 do
     cmd="${train_cmd} --seed ${seed}"
     if [[ "$loss" =~ ^(Linear-LR)$ ]]; then
-        #for omega in 1 0.25 0.0625 0.015625 0.00390625 0.0009765625 #0.000244140625
-        for omega in 0.0009765625 #0.000244140625
+        for bs in 1 #1 8 64 512 #0.25 1 2 4
         do
-            for l in 16 4 1 0.25 0.0625
+            for lr in 1e-5 #1e-2 1e-3 1e-4
             do
                 cmd="${train_cmd} --seed ${seed}"
                 cmd="${cmd} --l2_lambda ${l}"
-                #cmd="${cmd} --bsize_i ${bs}"
-                cmd="${cmd} --bratio ${br}"
+                cmd="${cmd} --bsize_i 1"
+                cmd="${cmd} --bsize_j 1"
                 cmd="${cmd} --learning_rate ${lr}"
                 cmd="${cmd} --omega ${omega}"
                 echo "${cmd}"
@@ -65,4 +63,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 2 -I {} sh -c {}

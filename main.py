@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from functools import partial
 
+import math
 import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -248,7 +249,7 @@ def main():
     config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
-    val_check_interval = len(train_loader)
+    val_check_interval = math.ceil(len(train_loader)/10.)
     config['total_steps'] = config.epochs * len(train_loader)
     trainer = pl.Trainer(
             logger=False,
