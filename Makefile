@@ -3,7 +3,7 @@ all: init activate
 
 init:
 	. ./init.sh
-	/usr/bin/python3 -m venv ./venv/
+	virtualenv -p /usr/bin/python3 ./venv/
 	chmod +x venv/bin/activate
 activate:
 	source ./venv/bin/activate; \

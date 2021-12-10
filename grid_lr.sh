@@ -45,7 +45,7 @@ do
     if [[ "$loss" =~ ^(Linear-LR)$ ]]; then
         for k in 1 #0.015625 #1 0.25 0.0625 0.015625 0.00390625 0.0009765625 #0.000244140625
         do
-            for br in 1 #1e-2 1e-4 #4 #16 4 1 0.25 0.0625
+            for br in 1 1e-2 1e-4 1e-6 #4 #16 4 1 0.25 0.0625
             do
                 cmd="${train_cmd} --seed ${seed}"
                 cmd="${cmd} --l2_lambda ${l}"
@@ -68,4 +68,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 1 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 2 -I {} sh -c {}

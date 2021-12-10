@@ -254,19 +254,22 @@ class TwoTowerModel(pl.LightningModule):
                             )
         func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
         gnorm = self._gnorm()
-        full_batch_msg = (f'epoch: {self.current_epoch}, gnorm: {gnorm.item():.6e}, func_val: {func_val.item():.6e}')
-        logging.debug(full_batch_msg)
+        msg = (f'global_step: {self.global_step}, epoch: {self.current_epoch}, gnorm: {gnorm.item():.6e}, func_val: {func_val.item():.6e}')
+        logging.debug(msg)
+        print(msg)
         opt.zero_grad()
-        return full_batch_msg
+        return
 
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx)
+        if self.config.check_func_val and (batch_idx % self.config.val_check_interval == 1):
+            self._calc_func_val()
         return loss
 
-    def training_epoch_end(self, training_step_outputs):
-        if self.config.check_func_val:
-            self.full_batch_msg = self._calc_func_val()
-        return
+    #def training_epoch_end(self, training_step_outputs):
+    #    if self.config.check_func_val:
+    #        self._calc_func_val()
+    #    return
 
     def validation_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
@@ -336,9 +339,6 @@ class TwoTowerModel(pl.LightningModule):
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
-
-        if self.config.check_func_val:
-            print(self.full_batch_msg)
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')

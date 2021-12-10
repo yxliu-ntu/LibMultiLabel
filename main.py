@@ -254,7 +254,7 @@ def main():
     config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
-    val_check_interval = math.ceil(len(train_loader)/10.)
+    config['val_check_interval'] = math.ceil(len(train_loader)/100.)
     if config.total_steps is None:
         config.total_steps = config.epochs * len(train_loader)
     elif config.epochs is None:
@@ -269,7 +269,8 @@ def main():
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,
             callbacks=callbacks,
-            val_check_interval=val_check_interval,
+            val_check_interval=config.val_check_interval,
+            enable_progress_bar=False,
             )
 
     setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
