@@ -26,6 +26,7 @@ class TwoTowerModel(pl.LightningModule):
     def __init__(self, config, Y_eval, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
+        self.automatic_optimization = False
 
         if isinstance(config, Namespace):
             config = vars(config)
@@ -211,65 +212,66 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
-        opt = self.optimizers()
-        Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
-        Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
-        Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
-        Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
-        Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
-        m, n = Utr.shape[0], Vtr.shape[0]
-        segment_m = math.ceil(m/bsize_i)
-        segment_n = math.ceil(n/bsize_j)
+        with torch.enable_grad():
+            Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
+            Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
+            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
+            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+            Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
+            m, n = Utr.shape[0], Vtr.shape[0]
+            segment_m = math.ceil(m/bsize_i)
+            segment_n = math.ceil(n/bsize_j)
 
-        P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-        if self.config.loss.startswith('Linear-LR'):
-            P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
-        else:
-            P, Q = self.network(Utr, Vtr)
-            Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-            Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+            P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
+            if self.config.loss.startswith('Linear-LR'):
+                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
+            else:
+                P, Q = self.network(Utr, Vtr)
+                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
 
-        func_val = torch.tensor(0.)
-        for i in range(segment_m):
-            i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
-            logits = torch.zeros(i_end-i_start, n)
-            target = spmtx2tensor(Ytr[i_start:i_end])
-            for j in range(segment_n):
-                j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                if self.config.loss.startswith('Linear-LR'):
-                    logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
-                    if self.config.isl2norm:
-                        uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
-                        logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
-                    func_val = func_val + self.mnloss(logits, target)
-                else:
-                    func_val = func_val + self.mnloss(
-                            target,
-                            Atr[i_start:i_end],
-                            Btr[j_start:j_end],
-                            P[i_start:i_end],
-                            Q[j_start:j_end],
-                            Pt[i_start:i_end],
-                            Qt[j_start:j_end]
-                            )
-        func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
-        gnorm = self._gnorm()
+            func_val = torch.tensor(0.)
+            for i in range(segment_m):
+                i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
+                logits = torch.zeros(i_end-i_start, n)
+                target = spmtx2tensor(Ytr[i_start:i_end])
+                for j in range(segment_n):
+                    j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
+                    if self.config.loss.startswith('Linear-LR'):
+                        logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
+                        if self.config.isl2norm:
+                            uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
+                            logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
+                        func_val = func_val + self.mnloss(logits, target)
+                    else:
+                        func_val = func_val + self.mnloss(
+                                target,
+                                Atr[i_start:i_end],
+                                Btr[j_start:j_end],
+                                P[i_start:i_end],
+                                Q[j_start:j_end],
+                                Pt[i_start:i_end],
+                                Qt[j_start:j_end]
+                                )
+            func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
+
+            opt = self.optimizers()
+            self.manual_backward(func_val)
+            gnorm = self._gnorm()
+            opt.zero_grad()
+
         msg = (f'global_step: {self.global_step}, epoch: {self.current_epoch}, gnorm: {gnorm.item():.6e}, func_val: {func_val.item():.6e}')
         logging.debug(msg)
         print(msg)
-        opt.zero_grad()
         return
 
     def training_step(self, batch, batch_idx):
+        opt = self.optimizers()
+        opt.zero_grad()
         loss = self.step(batch, batch_idx)
-        if self.config.check_func_val and (batch_idx % self.config.val_check_interval == 1):
-            self._calc_func_val()
+        self.manual_backward(loss)
+        opt.step()
         return loss
-
-    #def training_epoch_end(self, training_step_outputs):
-    #    if self.config.check_func_val:
-    #        self._calc_func_val()
-    #    return
 
     def validation_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
@@ -339,6 +341,9 @@ class TwoTowerModel(pl.LightningModule):
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
+
+        if self.config.check_func_val:
+            self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
