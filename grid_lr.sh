@@ -5,14 +5,14 @@ config=$1
 loss=$2
 gpu=$3
 
-solver="adagrad"
-#solver="sgd"
+#solver="adagrad"
+solver="sgd"
 lr=4.88e-04
 #epochs=100000000
 total_steps=100000000
 #br=1e-2
 k=1
-#omega=0.015625
+omega=0.015625
 l=4
 m=0
 wd=0.0
@@ -43,7 +43,7 @@ for seed in 1331 #1333 1335 1337 1339
 do
     cmd="${train_cmd} --seed ${seed}"
     if [[ "$loss" =~ ^(Linear-LR)$ ]]; then
-        for omega in 0.015625 #1 0.25 0.0625 0.015625 0.00390625 0.0009765625 #0.000244140625
+        for k in 1 #0.015625 #1 0.25 0.0625 0.015625 0.00390625 0.0009765625 #0.000244140625
         do
             for br in 1 #1e-2 1e-4 #4 #16 4 1 0.25 0.0625
             do

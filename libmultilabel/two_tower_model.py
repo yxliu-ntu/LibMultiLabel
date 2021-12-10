@@ -254,7 +254,7 @@ class TwoTowerModel(pl.LightningModule):
                             )
         func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
         gnorm = self._gnorm()
-        full_batch_msg = (f'epoch: {self.current_epoch}, gnorm: {gnorm.item():.4e}, func_val: {func_val.item():.4e}')
+        full_batch_msg = (f'epoch: {self.current_epoch}, gnorm: {gnorm.item():.6e}, func_val: {func_val.item():.6e}')
         logging.debug(full_batch_msg)
         opt.zero_grad()
         return full_batch_msg
