@@ -66,8 +66,10 @@ def get_config():
     # train
     parser.add_argument('--seed', type=int,
                         help='Random seed (default: %(default)s)')
-    parser.add_argument('--epochs', type=int, default=10000,
+    parser.add_argument('--epochs', type=int, default=None,
                         help='Number of epochs to train (default: %(default)s)')
+    parser.add_argument('--total_steps', type=int, default=None,
+                        help='Number of total steps to train (default: %(default)s), use this first when epochs and total_steps are all set')
     #parser.add_argument('--warmup_steps', type=int, default=0.0,
     #                    help='Number of warm-up steps for training (default: %(default)s)')
     parser.add_argument('--bratio', type=float, default=None,
@@ -149,6 +151,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--close_early_stop', action='store_true',
+                        help='Dsiable early stop')
     parser.add_argument('--check_func_val', action='store_true',
                         help='Check function value when training')
     parser.add_argument('--silent', action='store_true',
@@ -220,6 +224,7 @@ def main():
             monitor=config.val_metric,
             mode='max' if config.val_metric != 'Aver-Rank' else 'min',
             )
+    callbacks = [checkpoint_callback, earlystopping_callback] if not config.close_early_stop else [checkpoint_callback]
     #tb_logger = pl_loggers.TensorBoardLogger(config.tfboard_log_dir, name=config.run_name)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -250,7 +255,10 @@ def main():
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
     val_check_interval = math.ceil(len(train_loader)/10.)
-    config['total_steps'] = config.epochs * len(train_loader)
+    if config.total_steps is None:
+        config.total_steps = config.epochs * len(train_loader)
+    elif config.epochs is None:
+        config.epochs = config.total_steps // len(train_loader)
     trainer = pl.Trainer(
             logger=False,
             #logger=tb_logger,
@@ -260,7 +268,7 @@ def main():
             max_steps=config.total_steps,
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,
-            callbacks=[checkpoint_callback, earlystopping_callback],
+            callbacks=callbacks,
             val_check_interval=val_check_interval,
             )
 

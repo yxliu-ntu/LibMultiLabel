@@ -119,15 +119,19 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
-    def _l2_reg(self, l2_lambda):
-        l2_reg = torch.tensor(0.)
-        if l2_lambda > 0:
-            for param in self.parameters():
-                if param.requires_grad:
-                    l2_reg += torch.norm(param)**2
-            return 0.5 * l2_lambda * l2_reg
-        else:
-            return 0.0
+    def _gnorm(self):
+        gnorm = torch.tensor(0.)
+        for param in self.parameters():
+            if param.requires_grad:
+                gnorm += torch.norm(param.grad)**2
+        return gnorm**0.5
+
+    def _wnorm_sq(self):
+        wnorm_sq = torch.tensor(0.)
+        for param in self.parameters():
+            if param.requires_grad:
+                wnorm_sq += torch.norm(param)**2
+        return wnorm_sq
 
     def _logsoftmax_step(self, batch, batch_idx):
         raise NotImplementedError
@@ -187,7 +191,7 @@ class TwoTowerModel(pl.LightningModule):
             logits = torch.div(logits, uv_norm)
 
         amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        loss = amp*self.mnloss(logits, Y) + self._l2_reg(self.config.l2_lambda)
+        loss = (amp*self.mnloss(logits, Y) + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
@@ -201,59 +205,68 @@ class TwoTowerModel(pl.LightningModule):
         P, Q = self.network(us, vs)
         Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + self._l2_reg(self.config.l2_lambda)
+        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
-        with torch.no_grad():
-            Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
-            Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
-            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
-            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
-            Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
-            m, n = Utr.shape[0], Vtr.shape[0]
-            segment_m = math.ceil(m/bsize_i)
-            segment_n = math.ceil(n/bsize_j)
+        opt = self.optimizers()
+        Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
+        Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
+        Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
+        Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+        Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
+        m, n = Utr.shape[0], Vtr.shape[0]
+        segment_m = math.ceil(m/bsize_i)
+        segment_n = math.ceil(n/bsize_j)
 
-            P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-            if self.config.loss.startswith('Linear-LR'):
-                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
-            else:
-                P, Q = self.network(Utr, Vtr)
-                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
+        if self.config.loss.startswith('Linear-LR'):
+            P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
+        else:
+            P, Q = self.network(Utr, Vtr)
+            Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+            Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
 
-            for i in range(segment_m):
-                i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
-                logits = torch.zeros(i_end-i_start, n)
-                target = spmtx2tensor(Ytr[i_start:i_end])
-                for j in range(segment_n):
-                    j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                    if self.config.loss.startswith('Linear-LR'):
-                        logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
-                        if self.config.isl2norm:
-                            uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
-                            logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
-                        func_val = self.mnloss(logits, target) + self._l2_reg(self.config.l2_lambda)
-                    else:
-                        func_val = self.mnloss(
-                                target,
-                                Atr[i_start:i_end],
-                                Btr[j_start:j_end],
-                                P[i_start:i_end],
-                                Q[j_start:j_end],
-                                Pt[i_start:i_end],
-                                Qt[j_start:j_end]
-                                ) + self._l2_reg(self.config.l2_lambda)
-            print(f'epoch: {self.current_epoch}, func_val: {func_val.item():.4e}')
-            logging.debug(f'epoch: {self.current_epoch}, func_val: {func_val.item():.4e}')
-        return
+        func_val = torch.tensor(0.)
+        for i in range(segment_m):
+            i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
+            logits = torch.zeros(i_end-i_start, n)
+            target = spmtx2tensor(Ytr[i_start:i_end])
+            for j in range(segment_n):
+                j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
+                if self.config.loss.startswith('Linear-LR'):
+                    logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
+                    if self.config.isl2norm:
+                        uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
+                        logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
+                    func_val = func_val + self.mnloss(logits, target)
+                else:
+                    func_val = func_val + self.mnloss(
+                            target,
+                            Atr[i_start:i_end],
+                            Btr[j_start:j_end],
+                            P[i_start:i_end],
+                            Q[j_start:j_end],
+                            Pt[i_start:i_end],
+                            Qt[j_start:j_end]
+                            )
+        func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
+        gnorm = self._gnorm()
+        full_batch_msg = (f'epoch: {self.current_epoch}, gnorm: {gnorm.item():.4e}, func_val: {func_val.item():.4e}')
+        logging.debug(full_batch_msg)
+        opt.zero_grad()
+        return full_batch_msg
 
     def training_step(self, batch, batch_idx):
         loss = self.step(batch, batch_idx)
         return loss
+
+    def training_epoch_end(self, training_step_outputs):
+        if self.config.check_func_val:
+            self.full_batch_msg = self._calc_func_val()
+        return
 
     def validation_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
@@ -325,7 +338,7 @@ class TwoTowerModel(pl.LightningModule):
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
         if self.config.check_func_val:
-            self._calc_func_val()
+            print(self.full_batch_msg)
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
