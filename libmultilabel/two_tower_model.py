@@ -316,8 +316,8 @@ class TwoTowerModel(pl.LightningModule):
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
         if self.config.loss.startswith('Linear-LR') and self.config.isl2norm:
-            Unorm_sq = np.vstack([_data for _data in Unorm_sq if _data is not None])
-            Vnorm_sq = np.vstack([_data for _data in Vnorm_sq if _data is not None])
+            Unorm_sq = np.vstack([_data.reshape(-1, 1) for _data in Unorm_sq if _data is not None])
+            Vnorm_sq = np.vstack([_data.reshape(-1, 1) for _data in Vnorm_sq if _data is not None])
 
         m, n = P.shape[0], Q.shape[0]
         bsize_i = self.config.eval_bsize_i

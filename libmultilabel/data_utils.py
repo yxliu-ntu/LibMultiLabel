@@ -24,14 +24,17 @@ def svm_data_proc(x):
     idx, val = zip(*x)
     return idx, val
 
-def obj_arr_to_csr(U):
+def obj_arr_to_csr(U, max_j=None):
     ids, vals = zip(*U)
     indices, indptr = [], [0]
     for i in ids:
         indices.extend(i)
         indptr.append(indptr[-1] + len(i))
     data = [v for vs in vals for v in vs]
-    return csr_matrix((data, indices, indptr))
+    if max_j is None:
+        return csr_matrix((data, indices, indptr))
+    else:
+        return csr_matrix((data, indices, indptr), shape=(len(ids), max_j))
 
 def newtokenize(text, word_dict, max_seq_length):
     text = ' '.join(text.split(','))

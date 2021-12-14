@@ -243,10 +243,13 @@ def main():
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
     assert valid_loader is not None
-    for loader in dataloaders:
-        loader = dataloaders[loader]
-        loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U)
-        loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V)
+    for loader in [train_loader, valid_loader, test_loader]:
+        if loader == train_loader:
+            loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U)
+            loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V)
+        else:
+            loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U, train_loader.dataset.U.shape[1])
+            loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V, train_loader.dataset.V.shape[1])
     config['nnz'] = train_loader.dataset.nnz
     config['M'] = train_loader.dataset.U.shape[0]
     config['N'] = train_loader.dataset.V.shape[0]
