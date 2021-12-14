@@ -342,7 +342,7 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.config.check_func_val:
+        if self.config.check_func_val and split == 'val':
             self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
