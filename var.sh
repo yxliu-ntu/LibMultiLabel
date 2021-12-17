@@ -7,13 +7,13 @@ gpu=$3
 
 #solver="adagrad"
 solver="sgd"
-lr=4.88e-04
+lr=1e-05
 #epochs=100000000
 total_steps=100000000
 #br=1e-2
 k=1
-omega=0.015625
-l=4
+omega=0.0625
+l=1.0
 m=0
 wd=0.0
 
