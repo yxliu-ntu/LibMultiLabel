@@ -9,7 +9,7 @@ testL_path: data/ml-1m/mf_format/te
 testR_path: data/ml-1m/mf_format/item
 
 # train
-shuffle: False
+shuffle: True
 patience: 100000000
 gradient_clip_val: 0.0
 gradient_clip_algorithm: norm
