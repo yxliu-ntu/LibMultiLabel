@@ -245,6 +245,7 @@ class TwoTowerModel(pl.LightningModule):
                             uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
                             logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
                         func_val = func_val + self.mnloss(logits, target)
+                        func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
                     else:
                         if self.config.loss.startswith('Naive'):
                             func_val = func_val + self.mnloss(
@@ -267,14 +268,14 @@ class TwoTowerModel(pl.LightningModule):
                                     Pt[i_start:i_end],
                                     Qt[j_start:j_end],
                                     )
-            func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
+                        func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
 
             opt = self.optimizers()
             self.manual_backward(func_val)
             gnorm = self._gnorm()
             opt.zero_grad()
 
-        msg = ('global_step: {}, epoch: {}, training_time: {}, gnorm: {:.6e}, func_val: {:.6e}'.format(
+        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,

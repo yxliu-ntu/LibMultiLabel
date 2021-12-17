@@ -204,9 +204,9 @@ def main():
         config.data_name,
         Path(config.config).stem if config.config else config.model_name,
         config.loss,
+        datetime.now().strftime('%Y%m%d%H%M%S'),
         config.omega,
         config.l2_lambda,
-        datetime.now().strftime('%Y%m%d%H%M%S'),
     )
     config['is_sogram'] = 'Sogram' in config.loss
 
