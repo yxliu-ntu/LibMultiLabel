@@ -11,9 +11,9 @@ lr=1e-05
 #epochs=100000000
 total_steps=100000000
 #br=1e-2
-k=128
-omega=0.00390625
-l=0.25
+k=1
+omega=0.0625
+l=1.0
 m=0
 wd=0.0
 
@@ -42,16 +42,19 @@ train_cmd="${train_cmd} --result_dir ./runs/"
 for seed in 1331 #1333 1335 1337 1339
 do
     cmd="${train_cmd} --seed ${seed}"
-    if [[ "$loss" =~ ^(Naive-LRLR)$ ]]; then
-        for br in 1 1e-2 1e-4 1e-6 #4 #16 4 1 0.25 0.0625
+    if [[ "$loss" =~ ^(Linear-LR)$ ]]; then
+        for k in 1 #0.015625 #1 0.25 0.0625 0.015625 0.00390625 0.0009765625 #0.000244140625
         do
-            cmd="${train_cmd} --seed ${seed}"
-            cmd="${cmd} --l2_lambda ${l}"
-            #cmd="${cmd} --bsize_i ${bs}"
-            cmd="${cmd} --bratio ${br}"
-            cmd="${cmd} --learning_rate ${lr}"
-            cmd="${cmd} --omega ${omega}"
-            echo "${cmd}"
+            for br in 1 1e-2 1e-4 1e-6 #4 #16 4 1 0.25 0.0625
+            do
+                cmd="${train_cmd} --seed ${seed}"
+                cmd="${cmd} --l2_lambda ${l}"
+                #cmd="${cmd} --bsize_i ${bs}"
+                cmd="${cmd} --bratio ${br}"
+                cmd="${cmd} --learning_rate ${lr}"
+                cmd="${cmd} --omega ${omega}"
+                echo "${cmd}"
+            done
         done
     else
         echo "Don't support ${loss}!"
@@ -65,4 +68,4 @@ task
 wait
 
 # Run
-task | xargs -0 -d '\n' -P 4 -I {} sh -c {}
+task | xargs -0 -d '\n' -P 2 -I {} sh -c {}
