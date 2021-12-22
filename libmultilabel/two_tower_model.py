@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from .autograd_hacks import autograd_hacks as aghacks
 
 from abc import abstractmethod
 from argparse import Namespace
@@ -36,11 +37,20 @@ class TwoTowerModel(pl.LightningModule):
         self.config = self.hparams.config
         self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
-        self.network = getattr(networks, self.config.model_name)(self.config)
         self.tr_time = 0.0
         #self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
+        # init network
+        self.network = getattr(networks, self.config.model_name)(self.config)
+        if self.config.check_grad_var:
+            aghacks.add_hooks(self.network)
+
         # init loss
+        self._init_loss_and_step()
+
+        return
+
+    def _init_loss_and_step(self):
         #if self.config.loss == 'Naive-LogSoftmax':
         #    logging.info(f'loss_type: {self.config.loss}')
         #    self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
@@ -86,6 +96,7 @@ class TwoTowerModel(pl.LightningModule):
         #    self.step = self._sogram_step
         else:
             raise
+        return
 
     def configure_optimizers(self):
         """
@@ -124,12 +135,20 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
-    def _gnorm(self):
+    def _ginfo(self, loss_reduce_type, m, n):
         gnorm = torch.tensor(0.)
+        gsq = torch.tensor(0.)
         for param in self.parameters():
             if param.requires_grad:
                 gnorm += torch.norm(param.grad)**2
-        return gnorm**0.5
+                if self.config.check_grad_var:
+                    if loss_reduce_type == 'sum':
+                        gsq += ((param.grad1 * m * n + self.config.l2_lambda * param.data.detach().unsqueeze(0))**2).mean(dim=0).sum()
+                    elif loss_reduce_type == 'mean':
+                        gsq += ((param.grad1 + self.config.l2_lambda * param.data.detach())**2).mean(dim=0).sum()
+                    else:
+                        raise
+        return gnorm, gsq
 
     def _wnorm_sq(self):
         wnorm_sq = torch.tensor(0.)
@@ -215,8 +234,10 @@ class TwoTowerModel(pl.LightningModule):
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
-    def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
+    def _calc_func_val(self, bsize_i=8192, bsize_j=32768):
         with torch.enable_grad():
+            if self.config.check_grad_var:
+                aghacks.enable_hooks()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
             Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
             Atr = torch.Tensor(self.trainer.train_dataloader.dataset.datasets.A)
@@ -274,16 +295,32 @@ class TwoTowerModel(pl.LightningModule):
             else:
                 func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
 
+            loss_reduce_type = 'sum'
             opt = self.optimizers()
-            self.manual_backward(func_val)
-            gnorm = self._gnorm()
+            if not self.config.check_grad_var:
+                self.manual_backward(func_val)
+            else:
+                self.manual_backward(func_val, retain_graph=True)
+                aghacks.compute_grad1(self.network, loss_reduce_type)
+                aghacks.clear_backprops(self.network)
+
+                ## unitest
+                #for layer in self.network.modules():
+                #    if not aghacks.is_supported(layer):
+                #        continue
+                #    for param in layer.parameters():
+                #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
+
+            gnorm, gsq = self._ginfo(loss_reduce_type, m, n)
+            gvar = gsq - gnorm
             opt.zero_grad()
 
-        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, func_val: {:.6e}'.format(
+        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, gnorm_var: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
             gnorm.item(),
+            gvar.item() if self.config.check_grad_var else np.nan,
             func_val.item()
             ))
         logging.debug(msg)
@@ -291,6 +328,8 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
+        if self.config.check_grad_var:
+            aghacks.disable_hooks()
         opt = self.optimizers()
         opt.zero_grad()
         start_time = time.time()

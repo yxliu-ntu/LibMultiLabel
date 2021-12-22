@@ -159,6 +159,8 @@ def get_config():
                         help='Dsiable early stop')
     parser.add_argument('--check_func_val', action='store_true',
                         help='Check function value when training')
+    parser.add_argument('--check_grad_var', action='store_true',
+                        help='Check gradient variance when training')
     parser.add_argument('--silent', action='store_true',
                         help='Enable silent mode')
     parser.add_argument('--num_workers', type=int, default=4,
