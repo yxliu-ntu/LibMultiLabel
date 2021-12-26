@@ -268,7 +268,7 @@ def main():
     config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
-    config['val_check_interval'] = 1 if len(train_loader) < 100 else 100 #math.ceil(len(train_loader)/100.)
+    config['val_check_interval'] = min(len(train_loader), 100) if len(train_loader) < 1000 else 1000 #math.ceil(len(train_loader)/100.)
     if config.total_steps is None:
         config.total_steps = config.epochs * len(train_loader)
     elif config.epochs is None:

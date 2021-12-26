@@ -312,7 +312,7 @@ class TwoTowerModel(pl.LightningModule):
                 #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
 
             gnorm, gsq = self._ginfo(loss_reduce_type, m, n)
-            gvar = self.config.bratio*(gsq - gnorm)
+            gvar = (gsq - gnorm).item() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
             opt.zero_grad()
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, gnorm_var: {:.6e}, func_val: {:.6e}'.format(
@@ -320,7 +320,7 @@ class TwoTowerModel(pl.LightningModule):
             self.current_epoch,
             self.tr_time,
             gnorm.item(),
-            gvar.item() if self.config.check_grad_var else np.nan,
+            gvar if self.config.check_grad_var else np.nan,
             func_val.item()
             ))
         logging.debug(msg)
