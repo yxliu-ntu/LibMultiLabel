@@ -137,18 +137,26 @@ class TwoTowerModel(pl.LightningModule):
 
     def _ginfo(self, loss_reduce_type, m, n):
         gnorm = torch.tensor(0.)
-        gsq = torch.tensor(0.)
+        gsq_P = torch.zeros(m)
+        gsq_Q = torch.zeros(n)
         for param in self.parameters():
             if param.requires_grad:
                 gnorm += torch.norm(param.grad)**2
                 if self.config.check_grad_var:
                     if loss_reduce_type == 'sum':
-                        gsq += ((param.grad1 * m * n + self.config.l2_lambda * param.data.detach().unsqueeze(0))**2).mean(dim=0).sum()
+                        #gsq += ((param.grad1 * m * n + self.config.l2_lambda * param.data.detach().unsqueeze(0))**2).mean(dim=0).sum()
+                        gsq = ((param.grad1 * m * n + self.config.l2_lambda * param.data.detach().unsqueeze(0))**2).sum(dim=tuple(range(1, param.grad1.ndim)))
                     elif loss_reduce_type == 'mean':
-                        gsq += ((param.grad1 + self.config.l2_lambda * param.data.detach())**2).mean(dim=0).sum()
+                        #gsq += ((param.grad1 + self.config.l2_lambda * param.data.detach())**2).mean(dim=0).sum()
+                        gsq = ((param.grad1 + self.config.l2_lambda * param.data.detach().unsqueeze(0))**2).sum(dim=tuple(range(1, param.grad1.ndim)))
                     else:
                         raise
-        return gnorm, gsq
+
+                    if gsq.shape[0] == gsq_P.shape[0]:
+                        gsq_P += gsq
+                    else:
+                        gsq_Q += gsq
+        return gnorm, (gsq_P.unsqueeze(dim=-1) + gsq_Q)/(m*n)
 
     def _wnorm_sq(self):
         wnorm_sq = torch.tensor(0.)
@@ -312,7 +320,7 @@ class TwoTowerModel(pl.LightningModule):
                 #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
 
             gnorm, gsq = self._ginfo(loss_reduce_type, m, n)
-            gvar = (gsq - gnorm).item() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
+            gvar = (gsq.sum() - gnorm).item() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
             opt.zero_grad()
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, gnorm_var: {:.6e}, func_val: {:.6e}'.format(
