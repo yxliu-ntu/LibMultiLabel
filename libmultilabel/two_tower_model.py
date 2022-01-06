@@ -136,28 +136,35 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
-    def _ginfo(self, _stage):
+    def _ginfo1(self):
+        grad = torch.tensor(0.)
+        for param in self.parameters():
+            if param.requires_grad:
+                grad += (torch.norm(param.grad.detach())**2)
+        return grad
+
+    def _ginfo2(self, _stage):
         start_time = time.time()
         scaler = self.config.M * self.config.N
         bs = self.config.M if _stage==0 else self.config.N
         grad = []
         gs = torch.tensor(0.)
-        print('----ginfo_init:', 0)
+        #print('----ginfo_init:', 0)
 
         for param in self.parameters():
             if param.requires_grad:
                 # (1, K)
                 grad.append(param.grad.detach().reshape(1, -1))
-                print('----grad:', time.time() - start_time)
+                #print('----grad:', time.time() - start_time)
                 if param.grad1.shape[0] == bs:
                     # (bs, K) + (1, K) -> (bs, K) -> (1, )
-                    gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum()
-                    gs += ((param.grad1 * scaler)**2).sum()
+                    #gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum()
+                    gs += torch.norm(param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2
                 elif param.grad1.shape[0] == 1:
                     pass
                 else: # there are only two towers
                     raise
-                print('----gs:', time.time() - start_time)
+                #print('----gs:', time.time() - start_time)
         return torch.cat(grad, dim=-1), gs
 
     def _wnorm_sq(self):
@@ -245,17 +252,52 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _calc_func_val(self): #bsize_i=8192, bsize_j=32768):
+        def _inner_forward(Utr, Vtr, target):
+            if self.config.loss.startswith('Linear-LR'):
+                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
+                logits = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1)
+                if self.config.isl2norm:
+                    uv_norm = (Unorm_sq.unsqueeze(dim=-1) + Vnorm_sq) ** 0.5
+                    logits = torch.div(logits, uv_norm)
+                loss = self.mnloss(logits, target) / self.config.l2_lambda
+            else:
+                P, Q = self.network(Utr, Vtr)
+                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+                if self.config.loss.startswith('Naive'):
+                    loss = self.mnloss(target, Atr, Btr, P, Q, Pt, Qt, isscaling=False)
+                else:
+                    raise # the gradient of minibatch loss may have some bugs.
+            return loss
+
         with torch.enable_grad():
-            if self.config.check_grad_var:
-                aghacks.enable_hooks()
+            opt = self.optimizers()
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
             m, n = self.config.M, self.config.N
+            loss_reduce_type = 'sum'
 
+            # get gradExpSq
+            Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
+            Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
+            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
+            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+            target = spmtx2tensor(Ytr)
+            loss1 = _inner_forward(Utr, Vtr, target)
+            if self.config.loss.startswith('Linear-LR'):
+                loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq()
+            else:
+                loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+            self.manual_backward(loss1)
+            gExpSq1 = self._ginfo1()
+            opt.zero_grad()
+
+            # get gradSqExp
+            aghacks.enable_hooks()
+            grads = []
             fval = torch.zeros(2)
             gsP = torch.tensor(0.)
             gsQ = torch.tensor(0.)
             for _stage in range(2):
-                grads = []
                 bsize_i = m if _stage == 0 else 1
                 bsize_j = 1 if _stage == 0 else n
                 segment_m = math.ceil(m/bsize_i)
@@ -270,9 +312,9 @@ class TwoTowerModel(pl.LightningModule):
                         print(i, j)
                         start_time = time.time()
                         j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                        Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U[i_start: i_end])
+                        Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U[i_start:i_end])
                         Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V[j_start:j_end])
-                        Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A[i_start: i_end])
+                        Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A[i_start:i_end])
                         Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B[j_start:j_end])
                         target = spmtx2tensor(Ytr[i_start:i_end, j_start:j_end])
                         #logits = torch.zeros(i_end-i_start, n)
@@ -280,35 +322,13 @@ class TwoTowerModel(pl.LightningModule):
 
                         # Forward
                         if self.config.loss.startswith('Linear-LR'):
-                            P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
-                            logits = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1)
-                            if self.config.isl2norm:
-                                uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
-                                logits = torch.div(logits, uv_norm)
-                            loss = self.mnloss(logits, target) / self.config.l2_lambda + 0.5 * self._wnorm_sq() / (segment_m * segment_n)
+                            loss = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq() / (segment_m * segment_n)
                         else:
-                            P, Q = self.network(Utr, Vtr)
-                            Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                            Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-                            if self.config.loss.startswith('Naive'):
-                                loss = self.mnloss(
-                                        target,
-                                        Atr,
-                                        Btr,
-                                        P,
-                                        Q,
-                                        Pt,
-                                        Qt,
-                                        isscaling=False,
-                                        )
-                            else:
-                                raise # the gradient of minibatch loss may have some bugs.
-                            loss = loss + 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
+                            loss = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
 
-                        print('forward:', time.time() - start_time)
                         fval[_stage] += loss.detach()
-                        loss_reduce_type = 'sum'
-                        opt = self.optimizers()
+                        print('forward:', time.time() - start_time)
+
                         self.manual_backward(loss, retain_graph=True)
                         aghacks.compute_grad1(self.network, loss_reduce_type)
                         aghacks.clear_backprops(self.network)
@@ -321,11 +341,11 @@ class TwoTowerModel(pl.LightningModule):
                         #    for param in layer.parameters():
                         #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
                         if _stage == 0:
-                            _grad, _gsP = self._ginfo(_stage)
+                            _grad, _gsP = self._ginfo2(_stage)
                             print('ginfo:', time.time() - start_time)
                             gsP += _gsP
                         else:
-                            _grad, _gsQ = self._ginfo(_stage)
+                            _grad, _gsQ = self._ginfo2(_stage)
                             print('ginfo:', time.time() - start_time)
                             gsQ += _gsQ
                         if len(grads) == _stage:
@@ -334,9 +354,10 @@ class TwoTowerModel(pl.LightningModule):
                             grads[_stage] += _grad
                         opt.zero_grad()
                         print('finish:', time.time() - start_time)
-            assert torch.isclose(grads[0], grads[1])
-            assert torch.isclose(fval[0], fval[1])
-            gExpSq = (grads[0]**2).sum()
+            print(grads[0].pow(2).sum(), grads[1].pow(2).sum())
+            print(fval[0], fval[1])
+            print(loss1.item(), gExpSq1.item())
+            gExpSq = torch.norm(grads[0])**2
             gSqExp = (gsP + gsQ) / (self.config.M * self.config.N)
             gVar = (gSqExp - gExpSq) / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
 
@@ -443,5 +464,6 @@ class TwoTowerModel(pl.LightningModule):
             print('')
             logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
         self.eval_metric.reset()
+        exit()
 
         return metric_dict
