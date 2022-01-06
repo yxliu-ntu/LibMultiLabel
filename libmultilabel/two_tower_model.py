@@ -39,7 +39,7 @@ class TwoTowerModel(pl.LightningModule):
         self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
         self.tr_time = 0.0
-        #self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
+        self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
         # init network
         self.network = getattr(networks, self.config.model_name)(self.config)
@@ -147,25 +147,19 @@ class TwoTowerModel(pl.LightningModule):
         start_time = time.time()
         scaler = self.config.M * self.config.N
         bs = self.config.M if _stage==0 else self.config.N
-        grad = []
         gs = torch.zeros(bs)
         #print('----ginfo_init:', 0)
 
         for param in self.parameters():
             if param.requires_grad:
-                # (1, K)
-                grad.append(param.grad.detach().reshape(1, -1))
-                #print('----grad:', time.time() - start_time)
                 if param.grad1.shape[0] == bs:
-                    # (bs, K) + (1, K) -> (bs, K) -> (1, )
-                    #gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum()
                     gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum(dim=tuple(range(1, param.grad1.ndim)))
                 elif param.grad1.shape[0] == 1:
                     pass
                 else: # there are only two towers
                     raise
                 #print('----gs:', time.time() - start_time)
-        return torch.cat(grad, dim=-1), gs
+        return gs
 
     def _wnorm_sq(self):
         wnorm_sq = torch.tensor(0.)
@@ -282,13 +276,12 @@ class TwoTowerModel(pl.LightningModule):
             Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
             Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
             target = spmtx2tensor(Ytr)
-            loss1 = _inner_forward(Utr, Vtr, target)
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq()
             else:
                 loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
             self.manual_backward(loss1)
-            gExpSq1 = self._ginfo1()
+            gExpSq = self._ginfo1()
             opt.zero_grad()
 
             # get gradSqExp
@@ -297,19 +290,18 @@ class TwoTowerModel(pl.LightningModule):
             grads = []
             gsP = [] 
             gsQ = [] 
-            for _stage in range(2):
+            for _stage in trange(2):
                 bsize_i = m if _stage == 0 else 1
                 bsize_j = 1 if _stage == 0 else n
                 segment_m = math.ceil(m/bsize_i)
                 segment_n = math.ceil(n/bsize_j)
-                print(bsize_i, bsize_j, segment_m, segment_n)
+                #print(bsize_i, bsize_j, segment_m, segment_n)
 
                 P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-                func_val = torch.tensor(0.)
                 for i in range(segment_m):
                     i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
                     for j in range(segment_n):
-                        print(i, j)
+                        #print(i, j)
                         start_time = time.time()
                         j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
                         Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U[i_start:i_end])
@@ -318,7 +310,7 @@ class TwoTowerModel(pl.LightningModule):
                         Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B[j_start:j_end])
                         target = spmtx2tensor(Ytr[i_start:i_end, j_start:j_end])
                         #logits = torch.zeros(i_end-i_start, n)
-                        print('dataload:', time.time() - start_time)
+                        #print('dataload:', time.time() - start_time)
 
                         # Forward
                         if self.config.loss.startswith('Linear-LR'):
@@ -327,12 +319,12 @@ class TwoTowerModel(pl.LightningModule):
                             loss = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
 
                         fval[_stage] += loss.detach()
-                        print('forward:', time.time() - start_time)
+                        #print('forward:', time.time() - start_time)
 
                         self.manual_backward(loss, retain_graph=True)
                         aghacks.compute_grad1(self.network, loss_reduce_type)
                         aghacks.clear_backprops(self.network)
-                        print('backward:', time.time() - start_time)
+                        #print('backward:', time.time() - start_time)
 
                         ## unitest
                         #for layer in self.network.modules():
@@ -341,28 +333,24 @@ class TwoTowerModel(pl.LightningModule):
                         #    for param in layer.parameters():
                         #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
                         if _stage == 0:
-                            _grad, _gsP = self._ginfo2(_stage)
-                            print('ginfo:', time.time() - start_time)
+                            _gsP = self._ginfo2(_stage)
+                            #print('ginfo:', time.time() - start_time)
                             gsP.append(_gsP.unsqueeze(-1))
                         else:
-                            _grad, _gsQ = self._ginfo2(_stage)
-                            print('ginfo:', time.time() - start_time)
+                            _gsQ = self._ginfo2(_stage)
+                            #print('ginfo:', time.time() - start_time)
                             gsQ.append(_gsQ.unsqueeze(0))
-                        if len(grads) == _stage:
-                            grads.append(_grad)
-                        else:
-                            grads[_stage] += _grad
                         opt.zero_grad()
-                        print('finish:', time.time() - start_time)
-            print(grads[0].pow(2).sum(), grads[1].pow(2).sum())
-            print(fval[0], fval[1])
-            print(loss1.item(), gExpSq1.item())
+                        #print('finish:', time.time() - start_time)
+            #print(fval[0], fval[1])
+            #print(loss1.item(), gExpSq.item())
             gsP = torch.cat(gsP, dim=-1)
             gsQ = torch.cat(gsQ, dim=0)
-            gs = gsP + gsQ
-            gExpSq = torch.norm(grads[0])**2
-            gSqExp = gs.sum() / (self.config.M * self.config.N)
-            gVar = (gSqExp - gExpSq) / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
+            gSq = gsP + gsQ # (M, N)
+
+            self.tbwriter.add_histogram('noise', gSq - gExpSq, self.global_step, bins='auto')
+
+            gVar = (gSq.mean() - gExpSq) / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
@@ -467,6 +455,6 @@ class TwoTowerModel(pl.LightningModule):
             print('')
             logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
         self.eval_metric.reset()
-        exit()
+        #exit()
 
         return metric_dict

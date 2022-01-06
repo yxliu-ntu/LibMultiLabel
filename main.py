@@ -38,8 +38,8 @@ def get_config():
                         help='The directory to load data (default: %(default)s)')
     parser.add_argument('--result_dir', default='./runs',
                         help='The directory to save checkpoints and logs (default: %(default)s)')
-    #parser.add_argument('--tfboard_log_dir', default='./tfboard_logs',
-    #                    help='The directory to save tensorboard logs (default: %(default)s)')
+    parser.add_argument('--tfboard_log_dir', default='./tfboard_logs',
+                        help='The directory to save tensorboard logs (default: %(default)s)')
 
     # data
     parser.add_argument('--data_name', default='ml-1m',
