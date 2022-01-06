@@ -148,7 +148,7 @@ class TwoTowerModel(pl.LightningModule):
         scaler = self.config.M * self.config.N
         bs = self.config.M if _stage==0 else self.config.N
         grad = []
-        gs = torch.tensor(0.)
+        gs = torch.zeros(bs)
         #print('----ginfo_init:', 0)
 
         for param in self.parameters():
@@ -159,7 +159,7 @@ class TwoTowerModel(pl.LightningModule):
                 if param.grad1.shape[0] == bs:
                     # (bs, K) + (1, K) -> (bs, K) -> (1, )
                     #gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum()
-                    gs += torch.norm(param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2
+                    gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum(dim=tuple(range(1, param.grad1.ndim)))
                 elif param.grad1.shape[0] == 1:
                     pass
                 else: # there are only two towers
@@ -293,10 +293,10 @@ class TwoTowerModel(pl.LightningModule):
 
             # get gradSqExp
             aghacks.enable_hooks()
-            grads = []
             fval = torch.zeros(2)
-            gsP = torch.tensor(0.)
-            gsQ = torch.tensor(0.)
+            grads = []
+            gsP = [] 
+            gsQ = [] 
             for _stage in range(2):
                 bsize_i = m if _stage == 0 else 1
                 bsize_j = 1 if _stage == 0 else n
@@ -343,11 +343,11 @@ class TwoTowerModel(pl.LightningModule):
                         if _stage == 0:
                             _grad, _gsP = self._ginfo2(_stage)
                             print('ginfo:', time.time() - start_time)
-                            gsP += _gsP
+                            gsP.append(_gsP.unsqueeze(-1))
                         else:
                             _grad, _gsQ = self._ginfo2(_stage)
                             print('ginfo:', time.time() - start_time)
-                            gsQ += _gsQ
+                            gsQ.append(_gsQ.unsqueeze(0))
                         if len(grads) == _stage:
                             grads.append(_grad)
                         else:
@@ -357,8 +357,11 @@ class TwoTowerModel(pl.LightningModule):
             print(grads[0].pow(2).sum(), grads[1].pow(2).sum())
             print(fval[0], fval[1])
             print(loss1.item(), gExpSq1.item())
+            gsP = torch.cat(gsP, dim=-1)
+            gsQ = torch.cat(gsQ, dim=0)
+            gs = gsP + gsQ
             gExpSq = torch.norm(grads[0])**2
-            gSqExp = (gsP + gsQ) / (self.config.M * self.config.N)
+            gSqExp = gs.sum() / (self.config.M * self.config.N)
             gVar = (gSqExp - gExpSq) / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
