@@ -39,6 +39,7 @@ class TwoTowerModel(pl.LightningModule):
         self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
         self.tr_time = 0.0
+        self.mycount = 0 
         self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
         # init network
@@ -137,29 +138,32 @@ class TwoTowerModel(pl.LightningModule):
         return optimizer
 
     def _ginfo1(self):
-        grad = torch.tensor(0.)
+        gExp = []
         for param in self.parameters():
             if param.requires_grad:
-                grad += (torch.norm(param.grad.detach())**2)
-        return grad
+                gExp.append(param.grad.detach().clone())
+        return gExp # [P.grad, Q.grad]
 
-    def _ginfo2(self, _stage):
+    def _ginfo2(self, _stage, gExp):
         start_time = time.time()
         scaler = self.config.M * self.config.N
         bs = self.config.M if _stage==0 else self.config.N
-        gs = torch.zeros(bs)
+        grad_sum = torch.zeros(bs)
+        noise_sum = torch.zeros(bs)
         #print('----ginfo_init:', 0)
 
-        for param in self.parameters():
+        for _l, param in enumerate(self.parameters()):
             if param.requires_grad:
                 if param.grad1.shape[0] == bs:
-                    gs += ((param.grad1 * scaler + self.config.l2_lambda * param.data.unsqueeze(0))**2).sum(dim=tuple(range(1, param.grad1.ndim)))
+                    _grad = param.grad1 * scaler #+ self.config.l2_lambda * param.data.unsqueeze(0) #.sum(dim=tuple(range(1, param.grad1.ndim)))
+                    grad_sum += (_grad**2).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
+                    noise_sum += (_grad - gExp[_l]).pow_(2).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,)
                 elif param.grad1.shape[0] == 1:
                     pass
                 else: # there are only two towers
                     raise
                 #print('----gs:', time.time() - start_time)
-        return gs
+        return grad_sum, noise_sum
 
     def _wnorm_sq(self):
         wnorm_sq = torch.tensor(0.)
@@ -271,17 +275,21 @@ class TwoTowerModel(pl.LightningModule):
             loss_reduce_type = 'sum'
 
             # get gradExpSq
+            start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
             Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
             Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
             Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
             target = spmtx2tensor(Ytr)
             if self.config.loss.startswith('Linear-LR'):
-                loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq()
+                loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self._wnorm_sq()
             else:
-                loss1 = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+                loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self.config.l2_lambda * self._wnorm_sq()
+            #print('forward:', time.time() - start_time)
             self.manual_backward(loss1)
-            gExpSq = self._ginfo1()
+            #print('backward:', time.time() - start_time)
+            gExp = self._ginfo1()
+            #print('ginfo1:', time.time() - start_time)
             opt.zero_grad()
 
             # get gradSqExp
@@ -290,6 +298,8 @@ class TwoTowerModel(pl.LightningModule):
             grads = []
             gsP = [] 
             gsQ = [] 
+            nsP = [] 
+            nsQ = [] 
             for _stage in trange(2):
                 bsize_i = m if _stage == 0 else 1
                 bsize_j = 1 if _stage == 0 else n
@@ -333,30 +343,40 @@ class TwoTowerModel(pl.LightningModule):
                         #    for param in layer.parameters():
                         #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
                         if _stage == 0:
-                            _gsP = self._ginfo2(_stage)
+                            _gsP, _nsP = self._ginfo2(_stage, gExp)
                             #print('ginfo:', time.time() - start_time)
                             gsP.append(_gsP.unsqueeze(-1))
+                            nsP.append(_nsP.unsqueeze(-1))
                         else:
-                            _gsQ = self._ginfo2(_stage)
+                            _gsQ, _nsQ = self._ginfo2(_stage, gExp)
                             #print('ginfo:', time.time() - start_time)
                             gsQ.append(_gsQ.unsqueeze(0))
+                            nsQ.append(_nsQ.unsqueeze(0))
                         opt.zero_grad()
                         #print('finish:', time.time() - start_time)
             #print(fval[0], fval[1])
             #print(loss1.item(), gExpSq.item())
-            gsP = torch.cat(gsP, dim=-1)
+            gsP = torch.cat(gsP, dim=-1) # (M, N)
             gsQ = torch.cat(gsQ, dim=0)
-            gSq = gsP + gsQ # (M, N)
+            nsP = torch.cat(nsP, dim=-1)
+            nsQ = torch.cat(nsQ, dim=0)
+            gs = gsP + gsQ # (M, N)
+            ns = nsP + nsQ # (M, N)
+            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp])
 
-            self.tbwriter.add_histogram('noise', gSq - gExpSq, self.global_step, bins='auto')
+            save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
+            np.save(os.path.join(save_dir, 'gs_%d.npy'%self.global_step), gs)
+            np.save(os.path.join(save_dir, 'ns_%d.npy'%self.global_step), ns)
+            #self.tbwriter.add_histogram('grad_square', gs, self.global_step, bins='auto')
+            #self.tbwriter.add_histogram('noise_square', ns, self.global_step, bins='auto')
 
-            gVar = (gSq.mean() - gExpSq) / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
+            gVar = ns.mean() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
-            gExpSq.item(),
+            gExpSq,
             gVar.item(), #if self.config.check_grad_var else np.nan,
             fval[0].item()
             ))
@@ -446,8 +466,9 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.config.check_func_val and split == 'val':
+        if self.global_step // 10000 >= self.mycount: #self.config.check_func_val and split == 'val':
             self._calc_func_val()
+            self.mycount += 1
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
@@ -455,6 +476,5 @@ class TwoTowerModel(pl.LightningModule):
             print('')
             logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
         self.eval_metric.reset()
-        #exit()
 
         return metric_dict
