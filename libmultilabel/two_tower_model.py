@@ -156,8 +156,9 @@ class TwoTowerModel(pl.LightningModule):
             if param.requires_grad:
                 if param.grad1.shape[0] == bs:
                     _grad = param.grad1 * scaler #+ self.config.l2_lambda * param.data.unsqueeze(0) #.sum(dim=tuple(range(1, param.grad1.ndim)))
-                    grad_sum += (_grad**2).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
                     noise_sum += (_grad - gExp[_l]).pow_(2).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,)
+                    grad_sum += (_grad.pow_(2)).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
+                    #grad_sum += (_grad).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
                 elif param.grad1.shape[0] == 1:
                     pass
                 else: # there are only two towers
@@ -324,9 +325,9 @@ class TwoTowerModel(pl.LightningModule):
 
                         # Forward
                         if self.config.loss.startswith('Linear-LR'):
-                            loss = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq() / (segment_m * segment_n)
+                            loss = _inner_forward(Utr, Vtr, target) #+ 0.5 * self._wnorm_sq() / (segment_m * segment_n)
                         else:
-                            loss = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
+                            loss = _inner_forward(Utr, Vtr, target) #+ 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
 
                         fval[_stage] += loss.detach()
                         #print('forward:', time.time() - start_time)
@@ -354,15 +355,14 @@ class TwoTowerModel(pl.LightningModule):
                             nsQ.append(_nsQ.unsqueeze(0))
                         opt.zero_grad()
                         #print('finish:', time.time() - start_time)
-            #print(fval[0], fval[1])
-            #print(loss1.item(), gExpSq.item())
             gsP = torch.cat(gsP, dim=-1) # (M, N)
             gsQ = torch.cat(gsQ, dim=0)
             nsP = torch.cat(nsP, dim=-1)
             nsQ = torch.cat(nsQ, dim=0)
             gs = gsP + gsQ # (M, N)
             ns = nsP + nsQ # (M, N)
-            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp])
+            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp]) # each param grad ** 2, sum
+            #gExpSq = sum([ge.sum().item() for ge in gExp]) # each param grad ** 2, sum
 
             save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
             np.save(os.path.join(save_dir, 'gs_%d.npy'%self.global_step), gs)
@@ -378,7 +378,7 @@ class TwoTowerModel(pl.LightningModule):
             self.tr_time,
             gExpSq,
             gVar.item(), #if self.config.check_grad_var else np.nan,
-            fval[0].item()
+            fval[0].item() + 0.5 * self._wnorm_sq() if self.config.loss.startswith('Linear-LR') else fval[0].item() + 0.5 * self._wnorm_sq() * self.config.lambda,
             ))
         logging.debug(msg)
         print(msg)
@@ -466,7 +466,7 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.global_step // 10000 >= self.mycount: #self.config.check_func_val and split == 'val':
+        if self.global_step // 400000 >= self.mycount: #self.config.check_func_val and split == 'val':
             self._calc_func_val()
             self.mycount += 1
 
