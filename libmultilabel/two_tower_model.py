@@ -372,13 +372,14 @@ class TwoTowerModel(pl.LightningModule):
 
             gVar = ns.mean() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
 
+        fval += 0.5 * self._wnorm_sq() if self.config.loss.startswith('Linear-LR') else 0.5 * self._wnorm_sq() * self.config.l2_lambda
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
             gExpSq,
             gVar.item(), #if self.config.check_grad_var else np.nan,
-            fval[0].item() + 0.5 * self._wnorm_sq() if self.config.loss.startswith('Linear-LR') else fval[0].item() + 0.5 * self._wnorm_sq() * self.config.lambda,
+            fval[0].item(), 
             ))
         logging.debug(msg)
         print(msg)
