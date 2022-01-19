@@ -105,7 +105,9 @@ class TwoTowerModel(pl.LightningModule):
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate,
                                    initial_accumulator_value=0.1,
-                                   eps=1e-7)
+                                   #eps=1e-7)
+                                   eps=self.config.eps)
+            print('opt:%s'%optimizer_name, 'eps:%f'%self.config.eps)
         elif optimizer_name == 'adam':
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
@@ -217,8 +219,8 @@ class TwoTowerModel(pl.LightningModule):
         with torch.enable_grad():
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
             Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
-            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
-            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+            Atr = torch.Tensor(self.trainer.train_dataloader.dataset.datasets.A)
+            Btr = torch.Tensor(self.trainer.train_dataloader.dataset.datasets.B)
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
             m, n = Utr.shape[0], Vtr.shape[0]
             segment_m = math.ceil(m/bsize_i)
@@ -245,7 +247,6 @@ class TwoTowerModel(pl.LightningModule):
                             uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
                             logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
                         func_val = func_val + self.mnloss(logits, target)
-                        func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
                     else:
                         if self.config.loss.startswith('Naive'):
                             func_val = func_val + self.mnloss(
@@ -268,7 +269,10 @@ class TwoTowerModel(pl.LightningModule):
                                     Pt[i_start:i_end],
                                     Qt[j_start:j_end],
                                     )
-                        func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+            if self.config.loss.startswith('Linear-LR'):
+                func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
+            else:
+                func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
 
             opt = self.optimizers()
             self.manual_backward(func_val)

@@ -49,11 +49,11 @@ def generate_batch_sogram(data_batch):
     #return {
     #    'us': pad_sequence(us, batch_first=True),
     #    'vs': pad_sequence(vs, batch_first=True),
-    #    '_as':  torch.FloatTensor(data['_a']),
-    #    '_bs':  torch.FloatTensor(data['_b']),
-    #    '_abs': torch.FloatTensor(data['_ab']),
-    #    '_bbs': torch.FloatTensor(data['_bb']),
-    #    'ys': torch.FloatTensor(data['y'].A1.ravel()),
+    #    '_as':  torch.Tensor(data['_a']),
+    #    '_bs':  torch.Tensor(data['_b']),
+    #    '_abs': torch.Tensor(data['_ab']),
+    #    '_bbs': torch.Tensor(data['_bb']),
+    #    'ys': torch.Tensor(data['y'].A1.ravel()),
     #}
 
 def generate_batch_cross(data_batch):
@@ -62,10 +62,10 @@ def generate_batch_cross(data_batch):
     return {
         'us': spmtx2tensor(us) if us is not None else None,
         'vs': spmtx2tensor(vs) if vs is not None else None,
-        '_as':  torch.FloatTensor(data['_as']) if us is not None else None,
-        '_bs':  torch.FloatTensor(data['_bs']) if vs is not None else None,
-        '_abs': torch.FloatTensor(data['_abs']) if us is not None else None,
-        '_bbs': torch.FloatTensor(data['_bbs']) if vs is not None else None,
+        '_as':  torch.Tensor(data['_as']) if us is not None else None,
+        '_bs':  torch.Tensor(data['_bs']) if vs is not None else None,
+        '_abs': torch.Tensor(data['_abs']) if us is not None else None,
+        '_bbs': torch.Tensor(data['_bbs']) if vs is not None else None,
         'ys': spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
     }
 
@@ -74,7 +74,8 @@ def spmtx2tensor(spmtx):
     idx = np.vstack((coo.row, coo.col))
     val = coo.data
     idx = torch.LongTensor(idx)
-    val = torch.FloatTensor(val)
+    #val = torch.FloatTensor(val)
+    val = torch.Tensor(val)
     shape = coo.shape
     return torch.sparse_coo_tensor(idx, val, torch.Size(shape))
 

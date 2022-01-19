@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import yaml
+import torch
 from datetime import datetime
 from pathlib import Path
 from functools import partial
@@ -18,7 +19,6 @@ from pytorch_lightning import loggers as pl_loggers
 from libmultilabel import data_utils, MNLoss
 from libmultilabel.two_tower_model import TwoTowerModel
 from libmultilabel.utils import Timer, dump_log, init_device, set_seed
-
 
 def get_config():
     parser = argparse.ArgumentParser(
@@ -84,6 +84,8 @@ def get_config():
                         help='Learning rate for optimizer (default: %(default)s)')
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='Weight decay factor (default: %(default)s)')
+    parser.add_argument('--eps', type=float, default=1e-7,
+                        help='Epsilon factor for adagrad (default: %(default)s)')
     parser.add_argument('--l2_lambda', type=float, default=0,
                         help='L2 regularization factor (default: %(default)s)')
     parser.add_argument('--momentum', type=float, default=0.9,
@@ -151,6 +153,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--float64', action='store_true',
+                        help='enable float64 for training')
     parser.add_argument('--close_early_stop', action='store_true',
                         help='Dsiable early stop')
     parser.add_argument('--check_func_val', action='store_true',
@@ -196,6 +200,8 @@ def setup_loggers(log_path:str, is_silent: bool):
 def main():
     ## Load config
     config = get_config()
+    if config.float64:
+        torch.set_default_dtype(torch.float64)
     set_seed(seed=config.seed)
 
     config.device = init_device(use_cpu=config.cpu)

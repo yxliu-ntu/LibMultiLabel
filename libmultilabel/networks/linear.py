@@ -11,8 +11,10 @@ class Linear(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
-        torch.nn.init.xavier_uniform_(self.net_u.weight[1:, :])
-        torch.nn.init.xavier_uniform_(self.net_v.weight[1:, :])
+        torch.nn.init.constant_(self.net_u.weight[1:, :], 0.0)
+        torch.nn.init.constant_(self.net_v.weight[1:, :], 0.0)
+        #torch.nn.init.xavier_uniform_(self.net_u.weight[1:, :])
+        #torch.nn.init.xavier_uniform_(self.net_v.weight[1:, :])
 
     def _cal_output(self, inp, inp_placeholder):
         """
