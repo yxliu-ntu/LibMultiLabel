@@ -16,6 +16,7 @@ omega=0.0625
 l=1.0
 m=0
 wd=0.0
+eps=1e-7
 
 task(){
 # Set up train command
@@ -28,11 +29,13 @@ train_cmd="${train_cmd} --config ${config}"
 train_cmd="${train_cmd} --total_steps ${total_steps}"
 #train_cmd="${train_cmd} --bsize_i ${bs}"
 train_cmd="${train_cmd} --k ${k}"
+train_cmd="${train_cmd} --eps ${eps}"
 train_cmd="${train_cmd} --momentum ${m}"
 train_cmd="${train_cmd} --weight_decay ${wd}"
 train_cmd="${train_cmd} --loss ${loss}"
 train_cmd="${train_cmd} --isl2norm"
 train_cmd="${train_cmd} --cpu"
+train_cmd="${train_cmd} --float64"
 train_cmd="${train_cmd} --close_early_stop"
 train_cmd="${train_cmd} --check_func_val"
 train_cmd="${train_cmd} --result_dir ./runs/"
