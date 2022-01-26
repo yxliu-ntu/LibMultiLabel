@@ -297,17 +297,14 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 persample_grad_sq = w_sq + (m*n*jcb)**2 + 2*m*n*jcb*logits
             else:
-                def _helper(_UV, _PQ, _W):
-                    persample_grad_sq = [] 
-                    for i in trange(_PQ.shape[0]):
-                        _pq = torch.tile(_PQ[i].unsqueeze(0), (_UV.shape[0], 1, 1)) # (1, k) -> (1, 1, k) -> (M or N, 1, k)
-                        _tmp = torch.bmm(_UV.unsqueeze(-1), _pq) # (M or N, D, 1) outer_prod (M or N, 1, k) -> (M or N, D, k)
-                        _pgs = m*m*n*n*(_tmp**2).sum(dim=[1,2]) + \
-                                2*self.config.l2_lambda*m*n*(_tmp*_W).sum(dim=[1,2]) # (M or N, D, k) -> (M or N, )
-                        persample_grad_sq.append(_pgs)
-                    return torch.stack(persample_grad_sq) # (M, N) or (N, M)
-                persample_grad_sq =  _helper(Utr, Q, self.network.net_u.weight)
-                persample_grad_sq += _helper(Vtr, P, self.network.net_v.weight).T
+                def _helper(_UV, _PQ):
+                    if _PQ.shape[0] == m:
+                        _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(1)**2 # (M, 1)
+                    else:
+                        _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(0)**2 # (1, N)
+                    return (m*n*jcb)**2*_PQ_norm_sq + 2*self.config.l2_lambda*m*n*jcb*logits
+                persample_grad_sq =  _helper(Utr, Q)
+                persample_grad_sq += _helper(Vtr, P)
                 #persample_grad_sq = _helper(self.trainer.train_dataloader.dataset.datasets.U, Q, self.network.net_u.weight)
                 #persample_grad_sq += _helper(self.trainer.train_dataloader.dataset.datasets.V, P, self.network.net_v.weight).T
                 persample_grad_sq += self.config.l2_lambda**2 * w_sq + persample_grad_sq
@@ -403,7 +400,7 @@ class TwoTowerModel(pl.LightningModule):
             self.current_epoch,
             self.tr_time,
             0, #gExpSq,
-            0, #gVar.item(), #if self.config.check_grad_var else np.nan,
+            persample_grad_sq.mean().item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
             loss1.item(), #fval[0].item(), 
             ))
         logging.debug(msg)
@@ -413,7 +410,7 @@ class TwoTowerModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if self.config.check_grad_var:
             aghacks.disable_hooks()
-        if self.global_step % 100 == 0:
+        if self.global_step % 1 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
