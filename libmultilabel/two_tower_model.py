@@ -14,6 +14,7 @@ from abc import abstractmethod
 from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter
+from torch.autograd.functional import jacobian
 from pytorch_lightning.utilities.parsing import AttributeDict
 from . import networks
 from . import MNLoss
@@ -251,135 +252,71 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _calc_func_val(self): #bsize_i=8192, bsize_j=32768):
-        def _inner_forward(Utr, Vtr, target):
+        def _inner_forward(Utr, Vtr):
             if self.config.loss.startswith('Linear-LR'):
                 P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
                 logits = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1)
                 if self.config.isl2norm:
                     uv_norm = (Unorm_sq.unsqueeze(dim=-1) + Vnorm_sq) ** 0.5
                     logits = torch.div(logits, uv_norm)
-                loss = self.mnloss(logits, target) / self.config.l2_lambda
             else:
                 P, Q = self.network(Utr, Vtr)
-                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-                if self.config.loss.startswith('Naive'):
-                    loss = self.mnloss(target, Atr, Btr, P, Q, Pt, Qt, isscaling=False)
-                else:
-                    raise # the gradient of minibatch loss may have some bugs.
-            return loss
+                logits = P @ Q.T
+            return logits, P ,Q
+
+        def _loss(logits):
+            if self.config.loss.startswith('Linear-LR'):
+                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
+            else:
+                return self._weighted_lrloss(logits, target)
 
         with torch.enable_grad():
-            opt = self.optimizers()
+        #with torch.no_grad():
+            #opt = self.optimizers()
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
             m, n = self.config.M, self.config.N
             loss_reduce_type = 'sum'
 
-            # get gradExpSq
-            start_time = time.time()
+            #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
             Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
-            Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
-            Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
+            #Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
+            #Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
             target = spmtx2tensor(Ytr)
+            logits, P, Q = _inner_forward(Utr, Vtr)
+            w_sq = self._wnorm_sq()
+
             if self.config.loss.startswith('Linear-LR'):
-                loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self._wnorm_sq()
+                loss1 = _loss(logits) + 0.5 * w_sq
+            elif self.config.loss.startswith('Naive-LRLR'):
+                loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
-                loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self.config.l2_lambda * self._wnorm_sq()
-            #print('forward:', time.time() - start_time)
-            self.manual_backward(loss1)
-            #print('backward:', time.time() - start_time)
-            gExp = self._ginfo1()
-            #print('ginfo1:', time.time() - start_time)
-            opt.zero_grad()
+                raise
 
-            # get gradSqExp
-            aghacks.enable_hooks()
-            fval = torch.zeros(2)
-            grads = []
-            gsP = [] 
-            gsQ = [] 
-            nsP = [] 
-            nsQ = [] 
-            for _stage in trange(2):
-                bsize_i = m if _stage == 0 else 1
-                bsize_j = 1 if _stage == 0 else n
-                segment_m = math.ceil(m/bsize_i)
-                segment_n = math.ceil(n/bsize_j)
-                #print(bsize_i, bsize_j, segment_m, segment_n)
-
-                P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-                for i in range(segment_m):
-                    i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
-                    for j in range(segment_n):
-                        #print(i, j)
-                        start_time = time.time()
-                        j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                        Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U[i_start:i_end])
-                        Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V[j_start:j_end])
-                        Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A[i_start:i_end])
-                        Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B[j_start:j_end])
-                        target = spmtx2tensor(Ytr[i_start:i_end, j_start:j_end])
-                        #logits = torch.zeros(i_end-i_start, n)
-                        #print('dataload:', time.time() - start_time)
-
-                        # Forward
-                        if self.config.loss.startswith('Linear-LR'):
-                            loss = _inner_forward(Utr, Vtr, target) #+ 0.5 * self._wnorm_sq() / (segment_m * segment_n)
-                        else:
-                            loss = _inner_forward(Utr, Vtr, target) #+ 0.5 * self.config.l2_lambda * self._wnorm_sq() / (segment_m * segment_n)
-
-                        fval[_stage] += loss.detach()
-                        #print('forward:', time.time() - start_time)
-
-                        self.manual_backward(loss, retain_graph=True)
-                        aghacks.compute_grad1(self.network, loss_reduce_type)
-                        aghacks.clear_backprops(self.network)
-                        #print('backward:', time.time() - start_time)
-
-                        ## unitest
-                        #for layer in self.network.modules():
-                        #    if not aghacks.is_supported(layer):
-                        #        continue
-                        #    for param in layer.parameters():
-                        #        assert torch.allclose(param.grad, param.grad1.sum(dim=0) + self.config.l2_lambda * param.data.detach(), rtol=1e-05, atol=1e-05, equal_nan=True)
-                        if _stage == 0:
-                            _gsP, _nsP = self._ginfo2(_stage, gExp)
-                            #print('ginfo:', time.time() - start_time)
-                            gsP.append(_gsP.unsqueeze(-1))
-                            nsP.append(_nsP.unsqueeze(-1))
-                        else:
-                            _gsQ, _nsQ = self._ginfo2(_stage, gExp)
-                            #print('ginfo:', time.time() - start_time)
-                            gsQ.append(_gsQ.unsqueeze(0))
-                            nsQ.append(_nsQ.unsqueeze(0))
-                        opt.zero_grad()
-                        #print('finish:', time.time() - start_time)
-            gsP = torch.cat(gsP, dim=-1) # (M, N)
-            gsQ = torch.cat(gsQ, dim=0)
-            nsP = torch.cat(nsP, dim=-1)
-            nsQ = torch.cat(nsQ, dim=0)
-            gs = gsP + gsQ # (M, N)
-            ns = nsP + nsQ # (M, N)
-            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp]) # each param grad ** 2, sum
-            #gExpSq = sum([ge.sum().item() for ge in gExp]) # each param grad ** 2, sum
+            jcb = jacobian(_loss, logits)
+            if self.config.loss.startswith('Linear-LR'):
+                persample_grad_sq = w_sq + (m*n*jcb)**2 + 2*m*n*jcb*logits
+            else:
+                def _helper(_UV, _PQ):
+                    if _PQ.shape[0] == m:
+                        _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(1)**2 # (M, 1)
+                    else:
+                        _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(0)**2 # (1, N)
+                    return m*m*n*n*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*m*n*jcb*logits
+                persample_grad_sq =  _helper(Utr, Q)
+                persample_grad_sq += _helper(Vtr, P)
+                persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq + persample_grad_sq
 
             save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
-            np.save(os.path.join(save_dir, 'gs_%d.npy'%self.global_step), gs)
-            np.save(os.path.join(save_dir, 'ns_%d.npy'%self.global_step), ns)
-            #self.tbwriter.add_histogram('grad_square', gs, self.global_step, bins='auto')
-            #self.tbwriter.add_histogram('noise_square', ns, self.global_step, bins='auto')
+            np.save(os.path.join(save_dir, 'persample_grad_sq_%d.npy'%self.global_step), persample_grad_sq.detach().cpu().numpy())
 
-            gVar = ns.mean() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
-
-        fval += 0.5 * self._wnorm_sq() if self.config.loss.startswith('Linear-LR') else 0.5 * self._wnorm_sq() * self.config.l2_lambda
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
-            gExpSq,
-            gVar.item(), #if self.config.check_grad_var else np.nan,
-            fval[0].item(), 
+            0, #gExpSq,
+            persample_grad_sq.mean().item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
+            loss1.item(), #fval[0].item(), 
             ))
         logging.debug(msg)
         print(msg)
@@ -388,6 +325,8 @@ class TwoTowerModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if self.config.check_grad_var:
             aghacks.disable_hooks()
+        if self.global_step % 1 == 0:
+            self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
         start_time = time.time()
@@ -467,9 +406,12 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.global_step // 400000 >= self.mycount: #self.config.check_func_val and split == 'val':
-            self._calc_func_val()
-            self.mycount += 1
+        #if self.global_step // 400000 >= self.mycount: #self.config.check_func_val and split == 'val':
+        #if self.global_step // 10000 >= self.mycount and split == 'val':
+        #    self._calc_func_val()
+        #    self.mycount += 1
+        #if split == 'val':
+        #    self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
