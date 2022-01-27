@@ -302,12 +302,12 @@ class TwoTowerModel(pl.LightningModule):
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(1)**2 # (M, 1)
                     else:
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(0)**2 # (1, N)
-                    return (m*n*jcb)**2*_PQ_norm_sq + 2*self.config.l2_lambda*m*n*jcb*logits
+                    return m*m*n*n*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*m*n*jcb*logits
                 persample_grad_sq =  _helper(Utr, Q)
                 persample_grad_sq += _helper(Vtr, P)
                 #persample_grad_sq = _helper(self.trainer.train_dataloader.dataset.datasets.U, Q, self.network.net_u.weight)
                 #persample_grad_sq += _helper(self.trainer.train_dataloader.dataset.datasets.V, P, self.network.net_v.weight).T
-                persample_grad_sq += self.config.l2_lambda**2 * w_sq + persample_grad_sq
+                persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq + persample_grad_sq
 
 
             ##print('forward:', time.time() - start_time)
