@@ -316,7 +316,7 @@ class TwoTowerModel(pl.LightningModule):
                     return m*m*n*n*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*m*n*jcb*logits
                 persample_grad_sq =  _helper(Utr, Q)
                 persample_grad_sq += _helper(Vtr, P)
-                persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq + persample_grad_sq
+                persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq
 
             np.save(save_psg, persample_grad_sq.detach().cpu().numpy())
             grad_var = persample_grad_sq.mean() - fullbatch_grad_sq
@@ -337,7 +337,7 @@ class TwoTowerModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         #if self.config.check_grad_var:
         #    aghacks.disable_hooks()
-        if self.global_step % 100 == 0:
+        if self.global_step % 1 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
