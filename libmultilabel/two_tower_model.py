@@ -270,6 +270,7 @@ class TwoTowerModel(pl.LightningModule):
             return loss
 
         with torch.enable_grad():
+            aghacks.disable_hooks()
             opt = self.optimizers()
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
             m, n = self.config.M, self.config.N
@@ -284,13 +285,19 @@ class TwoTowerModel(pl.LightningModule):
             target = spmtx2tensor(Ytr)
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self._wnorm_sq()
+                loss2 = _inner_forward(Utr, Vtr, target) + 0.5 * self._wnorm_sq()
             else:
                 loss1 = _inner_forward(Utr, Vtr, target) #+ 0.5 * self.config.l2_lambda * self._wnorm_sq()
+                loss2 = _inner_forward(Utr, Vtr, target) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
             #print('forward:', time.time() - start_time)
             self.manual_backward(loss1)
             #print('backward:', time.time() - start_time)
             gExp = self._ginfo1()
             #print('ginfo1:', time.time() - start_time)
+            opt.zero_grad()
+
+            self.manual_backward(loss2)
+            gExp2 = self._ginfo1()
             opt.zero_grad()
 
             # get gradSqExp
@@ -361,7 +368,7 @@ class TwoTowerModel(pl.LightningModule):
             nsQ = torch.cat(nsQ, dim=0)
             gs = gsP + gsQ # (M, N)
             ns = nsP + nsQ # (M, N)
-            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp]) # each param grad ** 2, sum
+            gExpSq = sum([ge.pow_(2).sum().item() for ge in gExp2]) # each param grad ** 2, sum
             #gExpSq = sum([ge.sum().item() for ge in gExp]) # each param grad ** 2, sum
 
             save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
@@ -370,7 +377,7 @@ class TwoTowerModel(pl.LightningModule):
             #self.tbwriter.add_histogram('grad_square', gs, self.global_step, bins='auto')
             #self.tbwriter.add_histogram('noise_square', ns, self.global_step, bins='auto')
 
-            gVar = ns.mean() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else 0
+            gVar = ns.mean() / (self.config.M * self.config.N * self.config.bratio) if not self.config.bratio == 1 else torch.tensor(0.0)
 
         fval += 0.5 * self._wnorm_sq() if self.config.loss.startswith('Linear-LR') else 0.5 * self._wnorm_sq() * self.config.l2_lambda
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
@@ -386,6 +393,8 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
+        if self.global_step%1 == 0 : #self.config.check_func_val and split == 'val':
+            self._calc_func_val()
         if self.config.check_grad_var:
             aghacks.disable_hooks()
         opt = self.optimizers()
@@ -467,9 +476,9 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.global_step // 400000 >= self.mycount: #self.config.check_func_val and split == 'val':
-            self._calc_func_val()
-            self.mycount += 1
+        #if self.global_step // 400000 >= self.mycount: #self.config.check_func_val and split == 'val':
+        #    self._calc_func_val()
+        #    self.mycount += 1
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
             print(f'====== {split} dataset evaluation result =======')
