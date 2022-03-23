@@ -8,7 +8,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-#from .autograd_hacks import autograd_hacks as aghacks
 from tqdm import trange
 
 from abc import abstractmethod
@@ -46,8 +45,6 @@ class TwoTowerModel(pl.LightningModule):
 
         # init network
         self.network = getattr(networks, self.config.model_name)(self.config)
-        #if self.config.check_grad_var:
-        #    aghacks.add_hooks(self.network)
 
         # init loss
         self._init_loss_and_step()
@@ -114,25 +111,21 @@ class TwoTowerModel(pl.LightningModule):
             optimizer = optim.SGD(parameters, self.config.learning_rate,
                                   momentum=self.config.momentum,
                                   weight_decay=self.config.weight_decay)
-            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
         elif optimizer_name == 'adagrad':
             optimizer = optim.Adagrad(parameters,
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate,
                                    initial_accumulator_value=0.1,
-                                   #eps=1e-7)
                                    eps=self.config.eps)
             print('opt:%s'%optimizer_name, 'eps:%f'%self.config.eps)
-        elif optimizer_name == 'adam':
-            optimizer = optim.Adam(parameters,
-                                   weight_decay=self.config.weight_decay,
-                                   lr=self.config.learning_rate)
-            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
-        elif optimizer_name == 'adamw':
-            optimizer = optim.AdamW(parameters,
-                                    weight_decay=self.config.weight_decay,
-                                    lr=self.config.learning_rate)
-            #torch.nn.utils.clip_grad_value_(parameters, 0.5)
+        #elif optimizer_name == 'adam':
+        #    optimizer = optim.Adam(parameters,
+        #                           weight_decay=self.config.weight_decay,
+        #                           lr=self.config.learning_rate)
+        #elif optimizer_name == 'adamw':
+        #    optimizer = optim.AdamW(parameters,
+        #                            weight_decay=self.config.weight_decay,
+        #                            lr=self.config.learning_rate)
         else:
             raise RuntimeError(
                 'Unsupported optimizer: {self.config.optimizer}')
@@ -145,28 +138,6 @@ class TwoTowerModel(pl.LightningModule):
             if param.requires_grad:
                 gExp.append(param.grad.detach().clone())
         return gExp # [P.grad, Q.grad]
-
-    #def _ginfo2(self, _stage, gExp):
-    #    start_time = time.time()
-    #    scaler = self.config.M * self.config.N
-    #    bs = self.config.M if _stage==0 else self.config.N
-    #    grad_sum = torch.zeros(bs)
-    #    noise_sum = torch.zeros(bs)
-    #    #print('----ginfo_init:', 0)
-
-    #    for _l, param in enumerate(self.parameters()):
-    #        if param.requires_grad:
-    #            if param.grad1.shape[0] == bs:
-    #                _grad = param.grad1 * scaler #+ self.config.l2_lambda * param.data.unsqueeze(0) #.sum(dim=tuple(range(1, param.grad1.ndim)))
-    #                noise_sum += (_grad - gExp[_l]).pow_(2).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,)
-    #                grad_sum += (_grad.pow_(2)).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
-    #                #grad_sum += (_grad).sum(dim=tuple(range(1, param.grad1.ndim))) # sum over params -> (M,) or (N,) M * N * O(Du*k)
-    #            elif param.grad1.shape[0] == 1:
-    #                pass
-    #            else: # there are only two towers
-    #                raise
-    #            #print('----gs:', time.time() - start_time)
-    #    return grad_sum, noise_sum
 
     def _wnorm_sq(self):
         wnorm_sq = torch.tensor(0.)
@@ -187,14 +158,14 @@ class TwoTowerModel(pl.LightningModule):
 
     def _naive_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
-        ys = batch['ys']
+        ys, os = batch['ys'], batch['os']
         _as = batch['_as']
         _bs = batch['_bs']
 
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
@@ -212,7 +183,7 @@ class TwoTowerModel(pl.LightningModule):
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
 
-    def _weighted_lrloss(self, logits, Y):
+    def _weighted_lrloss(self, logits, Y, mask=None):
         _lrloss = F.binary_cross_entropy_with_logits
         coos = Y._indices()
         logits_pos = logits[coos[0], coos[1]]
@@ -220,6 +191,9 @@ class TwoTowerModel(pl.LightningModule):
         L_plus_part2 = _lrloss(logits_pos, logits_pos.new_zeros(logits_pos.size()), reduction='none')
         L_plus = L_plus_part1 - self.config.omega * L_plus_part2
         L_minus = _lrloss(logits, logits.new_zeros(logits.size()), reduction='none')
+        if mask is not None:
+            mask_coos = mask._indices()
+            L_minus = L_minus[mask_coos[0], mask_coos[1]]
         return L_plus.sum() + self.config.omega * L_minus.sum()
 
     def _linearlr_step(self, batch, batch_idx):
@@ -269,10 +243,11 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                return self._weighted_lrloss(logits, target)
+                return self._weighted_lrloss(logits, target, pn_mask_tr)
 
         save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
         save_Ytr = os.path.join(save_dir, 'Ytr.npz')
+        save_pn_mask_tr = os.path.join(save_dir, 'pn_mask_tr.npz')
         save_psg = os.path.join(save_dir, 'persample_grad_sq_%d.npy'%self.global_step)
 
         fullbatch_grad_sq = 0.0
@@ -281,9 +256,13 @@ class TwoTowerModel(pl.LightningModule):
             opt.zero_grad()
 
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
+            pn_mask_tr = self.trainer.train_dataloader.dataset.datasets.pn_mask
             m, n = self.config.M, self.config.N
             if not os.path.isfile(save_Ytr):
                 sp.sparse.save_npz(save_Ytr, Ytr)
+            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
+                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
+            scaler = m*n if pn_mask_tr is None else pn_mask_tr.sum()
 
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
@@ -291,6 +270,7 @@ class TwoTowerModel(pl.LightningModule):
             #Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
             #Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
             target = spmtx2tensor(Ytr)
+            pn_mask_tr = spmtx2tensor(pn_mask_tr)
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
@@ -306,19 +286,22 @@ class TwoTowerModel(pl.LightningModule):
 
             jcb = jacobian(_loss, logits)
             if self.config.loss.startswith('Linear-LR'):
-                persample_grad_sq = w_sq + (m*n*jcb)**2 + 2*m*n*jcb*logits
+                persample_grad_sq = w_sq + (scaler*jcb)**2 + 2*scaler*jcb*logits
             else:
                 def _helper(_UV, _PQ):
                     if _PQ.shape[0] == m:
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(1)**2 # (M, 1)
                     else:
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(0)**2 # (1, N)
-                    return m*m*n*n*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*m*n*jcb*logits
+                    return scaler*scaler*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*scaler*jcb*logits
                 persample_grad_sq =  _helper(Utr, Q)
                 persample_grad_sq += _helper(Vtr, P)
                 persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq
 
             np.save(save_psg, persample_grad_sq.detach().cpu().numpy())
+            if pn_mask_tr is not None:
+                mask_coos = pn_mask_tr._indices()
+                persample_grad_sq = persample_grad_sq[mask_coos[0], mask_coos[1]]
             grad_var = persample_grad_sq.mean() - fullbatch_grad_sq
             opt.zero_grad()
 
@@ -335,8 +318,6 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        #if self.config.check_grad_var:
-        #    aghacks.disable_hooks()
         if self.global_step % 1 == 0:
             self._calc_func_val()
         opt = self.optimizers()

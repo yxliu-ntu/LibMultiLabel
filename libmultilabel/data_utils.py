@@ -67,6 +67,7 @@ def generate_batch_cross(data_batch):
         '_abs': torch.Tensor(data['_abs']) if us is not None else None,
         '_bbs': torch.Tensor(data['_bbs']) if vs is not None else None,
         'ys': spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
+        'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
     }
 
 def spmtx2tensor(spmtx):

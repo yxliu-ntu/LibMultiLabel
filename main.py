@@ -72,6 +72,8 @@ def get_config():
                         help='Number of total steps to train (default: %(default)s), use this first when epochs and total_steps are all set')
     #parser.add_argument('--warmup_steps', type=int, default=0.0,
     #                    help='Number of warm-up steps for training (default: %(default)s)')
+    parser.add_argument('--np_ratio', type=int, default=None,
+                        help='neg vs pos ratio of training samples (default: %(default)s)')
     parser.add_argument('--bratio', type=float, default=None,
                         help='batch ratio of training samples for Sogram (default: %(default)s)')
     parser.add_argument('--bsize_i', type=int, default=16,
