@@ -166,7 +166,10 @@ class TwoTowerModel(pl.LightningModule):
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
         loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        if self.config.reduce_mode == 'mean':
+            scaler = os._nnz() if os is not None else ys.size()[0]*ys.size()[1]
+            loss = loss/scaler
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def _sogram_step(self, batch, batch_idx):
@@ -270,7 +273,8 @@ class TwoTowerModel(pl.LightningModule):
             #Atr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.A)
             #Btr = torch.FloatTensor(self.trainer.train_dataloader.dataset.datasets.B)
             target = spmtx2tensor(Ytr)
-            pn_mask_tr = spmtx2tensor(pn_mask_tr)
+            if pn_mask_tr is not None:
+                pn_mask_tr = spmtx2tensor(pn_mask_tr)
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
@@ -280,11 +284,16 @@ class TwoTowerModel(pl.LightningModule):
                 loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
+            if self.config.reduce_mode == 'mean':
+                loss1 = loss1/scaler
             self.manual_backward(loss1)
             fullbatch_grad = self._ginfo1() # params size
             fullbatch_grad_sq = sum([ge.pow_(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
 
             jcb = jacobian(_loss, logits)
+            if self.config.reduce_mode == 'mean':
+                jcb = jcb/scaler
+                w_sq = w_sq/scaler/scaler
             if self.config.loss.startswith('Linear-LR'):
                 persample_grad_sq = w_sq + (scaler*jcb)**2 + 2*scaler*jcb*logits
             else:

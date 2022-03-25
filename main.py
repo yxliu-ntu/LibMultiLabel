@@ -155,6 +155,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--reduce_mode', default='sum', choices=['sum', 'mean'],
+                        help='use mean or sum for loss reduction')
     parser.add_argument('--float64', action='store_true',
                         help='enable float64 for training')
     parser.add_argument('--close_early_stop', action='store_true',
