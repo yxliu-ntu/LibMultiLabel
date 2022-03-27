@@ -327,7 +327,7 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 1 == 0:
+        if self.global_step % 1000 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
