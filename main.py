@@ -106,7 +106,7 @@ def get_config():
                             'Linear-LR',
                             'Minibatch-LRSQ',
                             'Sogram-LRSQ',
-                            ], 
+                            ],
                         default=None,
                         help='Type of loss function. All only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
@@ -273,6 +273,9 @@ def main():
     config['Du'] = train_loader.dataset.U.shape[1]
     config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
+
+    if config.hard_omega:
+        config.omega = 1.0
 
     config['val_check_interval'] = min(len(train_loader), 100) if len(train_loader) < 1000 else 1000 #math.ceil(len(train_loader)/100.)
     if config.total_steps is None:

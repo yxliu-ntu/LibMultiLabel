@@ -40,7 +40,7 @@ class TwoTowerModel(pl.LightningModule):
         self.Y_eval = self.hparams.Y_eval
         self.eval_metric = MultiLabelMetrics(self.config)
         self.tr_time = 0.0
-        self.mycount = 0 
+        self.mycount = 0
         self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
         # init network
@@ -169,7 +169,7 @@ class TwoTowerModel(pl.LightningModule):
         if self.config.reduce_mode == 'mean':
             scaler = os._nnz() if os is not None else ys.size()[0]*ys.size()[1]
             loss = loss/scaler
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, omega: {self.config.omega}, loss: {loss.item()}')
         return loss
 
     def _sogram_step(self, batch, batch_idx):
@@ -242,6 +242,18 @@ class TwoTowerModel(pl.LightningModule):
                 logits = P @ Q.T
             return logits, P ,Q
 
+        def _ploss(logits):
+            if self.config.loss.startswith('Linear-LR'):
+                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
+            else:
+                return self._weighted_lrloss(logits, target, target)
+
+        def _nloss(logits):
+            if self.config.loss.startswith('Linear-LR'):
+                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
+            else:
+                return self._weighted_lrloss(logits, target, neg_mask_tr)
+
         def _loss(logits):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
@@ -259,13 +271,21 @@ class TwoTowerModel(pl.LightningModule):
             opt.zero_grad()
 
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
-            pn_mask_tr = self.trainer.train_dataloader.dataset.datasets.pn_mask
             m, n = self.config.M, self.config.N
             if not os.path.isfile(save_Ytr):
                 sp.sparse.save_npz(save_Ytr, Ytr)
+
+            pn_mask_tr = self.trainer.train_dataloader.dataset.datasets.pn_mask
             if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
                 sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
-            scaler = m*n if pn_mask_tr is None else pn_mask_tr.sum()
+            if pn_mask_tr is None:
+                scaler = m*n
+                neg_mask_tr = sp.sparse.csr_matrix(1.0 - Ytr.A)
+            else:
+                scaler = pn_mask_tr.sum()
+                neg_mask_tr = pn_mask_tr - Ytr
+            pos_num = Ytr.sum()
+            neg_num = neg_mask_tr.sum()
 
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
@@ -275,6 +295,45 @@ class TwoTowerModel(pl.LightningModule):
             target = spmtx2tensor(Ytr)
             if pn_mask_tr is not None:
                 pn_mask_tr = spmtx2tensor(pn_mask_tr)
+            neg_mask_tr = spmtx2tensor(neg_mask_tr)
+
+            ## Pos
+            opt.zero_grad()
+            logits, P, Q = _inner_forward(Utr, Vtr)
+            w_sq = self._wnorm_sq()
+
+            if self.config.loss.startswith('Naive-LRLR'):
+                loss1 = _ploss(logits)*m*n/pos_num + 0.5 * self.config.l2_lambda * w_sq
+            else:
+                raise
+            if self.config.reduce_mode == 'mean':
+                loss1 = loss1/scaler
+
+            self.manual_backward(loss1)
+            pos_grad = self._ginfo1() # params size
+            pos_grad_sq = sum([ge.pow(2).sum().item() for ge in pos_grad]) # each param grad ** 2, sum
+
+            ## Neg
+            opt.zero_grad()
+            logits, P, Q = _inner_forward(Utr, Vtr)
+            w_sq = self._wnorm_sq()
+
+            if self.config.loss.startswith('Naive-LRLR'):
+                loss1 = _nloss(logits)*m*n/neg_num + 0.5 * self.config.l2_lambda * w_sq
+            else:
+                raise
+            if self.config.reduce_mode == 'mean':
+                loss1 = loss1/scaler
+
+            self.manual_backward(loss1)
+            neg_grad = self._ginfo1() # params size
+            neg_grad_sq = sum([ge.pow(2).sum().item() for ge in neg_grad]) # each param grad ** 2, sum
+
+            # Pos - Neg
+            pn_grad_sq = sum([(pg - ng).pow(2).sum().item() for ng, pg in zip(neg_grad, pos_grad)]) # each param grad ** 2, sum
+
+            ## Full
+            opt.zero_grad()
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
@@ -286,9 +345,10 @@ class TwoTowerModel(pl.LightningModule):
                 raise
             if self.config.reduce_mode == 'mean':
                 loss1 = loss1/scaler
+
             self.manual_backward(loss1)
             fullbatch_grad = self._ginfo1() # params size
-            fullbatch_grad_sq = sum([ge.pow_(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
+            fullbatch_grad_sq = sum([ge.pow(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
 
             jcb = jacobian(_loss, logits)
             if self.config.reduce_mode == 'mean':
@@ -314,13 +374,16 @@ class TwoTowerModel(pl.LightningModule):
             grad_var = persample_grad_sq.mean() - fullbatch_grad_sq
             opt.zero_grad()
 
-        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
+        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}, gpos: {:.6e}, gneg: {:.6e}, gpn: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
             fullbatch_grad_sq, #gExpSq,
             grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
-            loss1.item(), #fval[0].item(), 
+            loss1.item(), #fval[0].item(),
+            pos_grad_sq,
+            neg_grad_sq,
+            pn_grad_sq,
             ))
         logging.debug(msg)
         print(msg)
@@ -364,9 +427,9 @@ class TwoTowerModel(pl.LightningModule):
         else:
             P, Q = self.network(batch['us'], batch['vs'])
         return {
-                'P': P.detach().cpu().numpy() if P is not None else None, 
+                'P': P.detach().cpu().numpy() if P is not None else None,
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,
-                'Unorm_sq': Unorm_sq.detach().cpu().numpy() if Unorm_sq is not None else None, 
+                'Unorm_sq': Unorm_sq.detach().cpu().numpy() if Unorm_sq is not None else None,
                 'Vnorm_sq': Vnorm_sq.detach().cpu().numpy() if Vnorm_sq is not None else None,
                 }
 
