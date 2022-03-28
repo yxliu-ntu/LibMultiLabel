@@ -46,6 +46,9 @@ class TwoTowerModel(pl.LightningModule):
         # init network
         self.network = getattr(networks, self.config.model_name)(self.config)
 
+        if self.config.init_weight_path is not None:
+            self.network.load_state_dict(torch.load(self.config.init_weight_path))
+
         # init loss
         self._init_loss_and_step()
 
@@ -264,6 +267,9 @@ class TwoTowerModel(pl.LightningModule):
         save_Ytr = os.path.join(save_dir, 'Ytr.npz')
         save_pn_mask_tr = os.path.join(save_dir, 'pn_mask_tr.npz')
         save_psg = os.path.join(save_dir, 'persample_grad_sq_%d.npy'%self.global_step)
+        save_model = os.path.join(save_dir, 'model_%d.pth'%self.global_step)
+
+        torch.save(self.network.state_dict(), save_model)
 
         fullbatch_grad_sq = 0.0
         with torch.enable_grad():

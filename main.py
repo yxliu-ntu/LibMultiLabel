@@ -121,6 +121,8 @@ def get_config():
                         help='Model to be used (default: %(default)s)')
     parser.add_argument('--init_weight', default='kaiming_uniform',
                         help='Weight initialization to be used (default: %(default)s)')
+    parser.add_argument('--init_weight_path', default=None,
+                        help='path of .pth for Weight initialization (default: %(default)s)')
     parser.add_argument('--activation', default='relu',
                         help='Activation function to be used (default: %(default)s)')
     parser.add_argument('--k', type=int, default=128,
