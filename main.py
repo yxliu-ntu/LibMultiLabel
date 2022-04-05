@@ -157,6 +157,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--no_pos', action='store_true',
+                        help='remove all positive samples')
     parser.add_argument('--hard_omega', action='store_true',
                         help='select negs equivalent to the omega setting')
     parser.add_argument('--reduce_mode', default='sum', choices=['sum', 'mean'],
