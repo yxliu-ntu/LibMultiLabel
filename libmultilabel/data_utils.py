@@ -22,6 +22,8 @@ PAD = '**PAD**'
 def svm_data_proc(x):
     x = [(int(i.split(':')[0]), float(i.split(':')[1])) for i in x.split()]
     idx, val = zip(*x)
+    if 0 in idx:
+        raise ValueError('The feature idx should start from 0!')
     return idx, val
 
 def obj_arr_to_csr(U, max_j=None):

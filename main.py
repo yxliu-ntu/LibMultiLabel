@@ -103,6 +103,7 @@ def get_config():
                             'Naive-LogSoftmax',
                             'Naive-LRLR',
                             'Naive-LRSQ',
+                            'Naive-SQSQ',
                             'Linear-LR',
                             'Minibatch-LRSQ',
                             'Sogram-LRSQ',
@@ -115,6 +116,10 @@ def get_config():
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
+    parser.add_argument('--sq_pos_val', type=float, default=1.0,
+                        help='Imputed value for the pos part of the sqsq-loss function')
+    parser.add_argument('--sq_neg_val', type=float, default=-1.0,
+                        help='Imputed value for the neg part of the sqsq-loss function')
 
     # model
     parser.add_argument('--model_name', default='ffm',

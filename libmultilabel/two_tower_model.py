@@ -80,6 +80,10 @@ class TwoTowerModel(pl.LightningModule):
                     N=self.config.N,
                     )
             self.step = self._naive_step
+        elif self.config.loss == 'Naive-SQSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = self._weighted_sqsqloss
+            self.step = self._naive_sqsq_step
         elif self.config.loss == 'Minibatch-LRSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.MinibatchMNLoss(
@@ -175,6 +179,21 @@ class TwoTowerModel(pl.LightningModule):
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, omega: {self.config.omega}, loss: {loss.item()}')
         return loss
 
+    def _naive_sqsq_step(self, batch, batch_idx):
+        us, vs = batch['us'], batch['vs']
+        ys, os = batch['ys'], batch['os']
+
+        ps, qs = self.network(batch['us'], batch['vs'])
+        logits = ps @ qs.T
+
+        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
+        loss = amp * self.mnloss(logits, ys, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        if self.config.reduce_mode == 'mean':
+            raise
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
     def _sogram_step(self, batch, batch_idx):
         raise NotImplementedError
         #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
@@ -188,6 +207,19 @@ class TwoTowerModel(pl.LightningModule):
         #loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
+
+    def _weighted_sqsqloss(self, logits, Y, mask=None):
+        _sqloss = F.mse_loss
+        coos = Y._indices()
+        logits_pos = logits[coos[0], coos[1]]
+        L_plus_part1 = _sqloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_pos_val), reduction='none')
+        L_plus_part2 = _sqloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_neg_val), reduction='none')
+        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
+        L_minus = _sqloss(logits, logits.new_full(logits.size(), self.config.sq_neg_val), reduction='none')
+        if mask is not None:
+            mask_coos = mask._indices()
+            L_minus = L_minus[mask_coos[0], mask_coos[1]]
+        return L_plus.sum() + self.config.omega * L_minus.sum()
 
     def _weighted_lrloss(self, logits, Y, mask=None):
         _lrloss = F.binary_cross_entropy_with_logits
@@ -249,25 +281,38 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                return self._weighted_lrloss(logits, target, target)
+                if self.config.loss in ['Naive-SQSQ']:
+                    return self._weighted_sqsqloss(logits, target, target)
+                else:
+                    return self._weighted_lrloss(logits, target, target)
 
         def _nloss(logits):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                return self._weighted_lrloss(logits, target, neg_mask_tr)
+                if self.config.loss in ['Naive-SQSQ']:
+                    return self._weighted_sqsqloss(logits, target, neg_mask_tr)
+                else:
+                    return self._weighted_lrloss(logits, target, neg_mask_tr)
 
         def _loss(logits):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                return self._weighted_lrloss(logits, target, pn_mask_tr)
+                if self.config.loss in ['Naive-SQSQ']:
+                    return self._weighted_sqsqloss(logits, target, pn_mask_tr)
+                else:
+                    return self._weighted_lrloss(logits, target, pn_mask_tr)
 
         save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
         save_Ytr = os.path.join(save_dir, 'Ytr.npz')
         save_pn_mask_tr = os.path.join(save_dir, 'pn_mask_tr.npz')
         save_psg = os.path.join(save_dir, 'persample_grad_sq_%d.npy'%self.global_step)
+        save_jcb = os.path.join(save_dir, 'jcb_%d.npy'%self.global_step)
+        save_P = os.path.join(save_dir, 'P_%d.npy'%self.global_step)
+        save_Q = os.path.join(save_dir, 'Q_%d.npy'%self.global_step)
         save_model = os.path.join(save_dir, 'model_%d.pth'%self.global_step)
+        save_info = os.path.join(save_dir, 'info_%d.pth'%self.global_step)
 
         torch.save(self.network.state_dict(), save_model)
 
@@ -308,7 +353,7 @@ class TwoTowerModel(pl.LightningModule):
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
-            if self.config.loss.startswith('Naive-LRLR'):
+            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
                 loss1 = _ploss(logits)*m*n/pos_num + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -324,7 +369,7 @@ class TwoTowerModel(pl.LightningModule):
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
-            if self.config.loss.startswith('Naive-LRLR'):
+            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
                 loss1 = _nloss(logits)*m*n/neg_num + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -342,10 +387,14 @@ class TwoTowerModel(pl.LightningModule):
             opt.zero_grad()
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
+            if not os.path.isfile(save_P):
+                np.save(save_P, P.detach().cpu().numpy())
+            if not os.path.isfile(save_Q):
+                np.save(save_Q, Q.detach().cpu().numpy())
 
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _loss(logits) + 0.5 * w_sq
-            elif self.config.loss.startswith('Naive-LRLR'):
+            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
                 loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -357,6 +406,9 @@ class TwoTowerModel(pl.LightningModule):
             fullbatch_grad_sq = sum([ge.pow(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
 
             jcb = jacobian(_loss, logits)
+            if not os.path.isfile(save_jcb):
+                np.save(save_jcb, jcb.detach().cpu().numpy())
+
             if self.config.reduce_mode == 'mean':
                 jcb = jcb/scaler
                 w_sq = w_sq/scaler/scaler
@@ -380,6 +432,16 @@ class TwoTowerModel(pl.LightningModule):
             grad_var = persample_grad_sq.mean() - fullbatch_grad_sq
             opt.zero_grad()
 
+        infos = np.array([self.global_step,
+            self.current_epoch,
+            self.tr_time,
+            fullbatch_grad_sq, #gExpSq,
+            grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
+            loss1.item(), #fval[0].item(),
+            pos_grad_sq,
+            neg_grad_sq,
+            pn_grad_sq])
+        np.save(save_info, infos)
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}, gpos: {:.6e}, gneg: {:.6e}, gpn: {:.6e}'.format(
             self.global_step,
             self.current_epoch,
@@ -396,7 +458,7 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 1000 == 0:
+        if self.global_step % 100 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
