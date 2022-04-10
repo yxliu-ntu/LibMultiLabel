@@ -223,7 +223,6 @@ class TwoTowerModel(pl.LightningModule):
             return self.config.omega * L_minus.sum()
         else:
             return L_plus.sum() + self.config.omega * L_minus.sum()
-        else:
 
     def _weighted_lrloss(self, logits, Y, mask=None, isnloss=False):
         _lrloss = F.binary_cross_entropy_with_logits
@@ -240,7 +239,6 @@ class TwoTowerModel(pl.LightningModule):
             return self.config.omega * L_minus.sum()
         else:
             return L_plus.sum() + self.config.omega * L_minus.sum()
-        else:
 
     def _linearlr_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
