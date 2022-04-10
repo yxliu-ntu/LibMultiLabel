@@ -208,7 +208,7 @@ class TwoTowerModel(pl.LightningModule):
         #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #return loss
 
-    def _weighted_sqsqloss(self, logits, Y, mask=None):
+    def _weighted_sqsqloss(self, logits, Y, mask=None, isnloss=False):
         _sqloss = F.mse_loss
         coos = Y._indices()
         logits_pos = logits[coos[0], coos[1]]
@@ -219,9 +219,13 @@ class TwoTowerModel(pl.LightningModule):
         if mask is not None:
             mask_coos = mask._indices()
             L_minus = L_minus[mask_coos[0], mask_coos[1]]
-        return L_plus.sum() + self.config.omega * L_minus.sum()
+        if isnloss:
+            return self.config.omega * L_minus.sum()
+        else:
+            return L_plus.sum() + self.config.omega * L_minus.sum()
+        else:
 
-    def _weighted_lrloss(self, logits, Y, mask=None):
+    def _weighted_lrloss(self, logits, Y, mask=None, isnloss=False):
         _lrloss = F.binary_cross_entropy_with_logits
         coos = Y._indices()
         logits_pos = logits[coos[0], coos[1]]
@@ -232,7 +236,11 @@ class TwoTowerModel(pl.LightningModule):
         if mask is not None:
             mask_coos = mask._indices()
             L_minus = L_minus[mask_coos[0], mask_coos[1]]
-        return L_plus.sum() + self.config.omega * L_minus.sum()
+        if isnloss:
+            return self.config.omega * L_minus.sum()
+        else:
+            return L_plus.sum() + self.config.omega * L_minus.sum()
+        else:
 
     def _linearlr_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
@@ -291,9 +299,9 @@ class TwoTowerModel(pl.LightningModule):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
                 if self.config.loss in ['Naive-SQSQ']:
-                    return self._weighted_sqsqloss(logits, target, neg_mask_tr)
+                    return self._weighted_sqsqloss(logits, target, neg_mask_tr, True)
                 else:
-                    return self._weighted_lrloss(logits, target, neg_mask_tr)
+                    return self._weighted_lrloss(logits, target, neg_mask_tr, True)
 
         def _loss(logits):
             if self.config.loss.startswith('Linear-LR'):
