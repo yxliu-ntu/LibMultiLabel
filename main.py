@@ -80,6 +80,10 @@ def get_config():
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
+    parser.add_argument('--pos_bs', type=int, default=1,
+                        help='Size of training batches of positive samples (default: %(default)s)')
+    parser.add_argument('--neg_bs', type=int, default=1,
+                        help='Size of training batches of negative samples (default: %(default)s)')
     parser.add_argument('--optimizer', default='adagrad', choices=['adam', 'sgd', 'adamw', 'adagrad'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
@@ -100,13 +104,15 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            'Naive-LogSoftmax',
+                            #'Naive-LogSoftmax',
                             'Naive-LRLR',
                             'Naive-LRSQ',
                             'Naive-SQSQ',
+                            'PN-LRLR',
+                            'PN-SQSQ',
                             'Linear-LR',
-                            'Minibatch-LRSQ',
-                            'Sogram-LRSQ',
+                            #'Minibatch-LRSQ',
+                            #'Sogram-LRSQ',
                             ],
                         default=None,
                         help='Type of loss function. All only support two-tower models.')
@@ -193,7 +199,12 @@ def get_config():
     #for i in ['trainL', 'trainR', 'validL', 'validR', 'testL', 'testR']:
     #    if config['%s_path'%i] is None:
     #        config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
-    config['dataset_type'] = 'nonzero' if 'Sogram' in config.loss else 'cross'
+    if 'Sogram' in config.loss:
+        config['dataset_type'] = 'nonzero'
+    elif 'PN' in config.loss:
+        config['dataset_type'] = 'pn'
+    else:
+        config['dataset_type'] = 'cross'
     return config
 
 def setup_loggers(log_path:str, is_silent: bool):
@@ -233,6 +244,7 @@ def main():
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
     config['is_sogram'] = 'Sogram' in config.loss
+    config['is_pn'] = 'PN' in config.loss
 
     ## Build model, set logger and checkpoint
     _Model = TwoTowerModel
@@ -261,6 +273,7 @@ def main():
             data_utils.svm_data_proc,
             data_utils.svm_data_proc,
             data_utils.generate_batch_cross,
+            data_utils.generate_batch_pn,
             data_utils.generate_batch_sogram,
             rng=rng,
             )
@@ -277,6 +290,7 @@ def main():
             loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U, train_loader.dataset.U.shape[1])
             loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V, train_loader.dataset.V.shape[1])
     config['nnz'] = train_loader.dataset.nnz
+    config['nz'] = train_loader.dataset.nz
     config['M'] = train_loader.dataset.U.shape[0]
     config['N'] = train_loader.dataset.V.shape[0]
     config['Du'] = train_loader.dataset.U.shape[1]

@@ -72,6 +72,18 @@ def generate_batch_cross(data_batch):
         'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
     }
 
+def generate_batch_pn(data_batch):
+    data = data_batch[0]
+    return {
+        'u_pos': spmtx2tensor(data['u_pos']),
+        'v_pos': spmtx2tensor(data['v_pos']),
+        'u_neg': spmtx2tensor(data['u_neg']),
+        'v_neg': spmtx2tensor(data['v_neg']),
+        'y_pos': spmtx2tensor(data['y_pos']),
+        'y_neg': spmtx2tensor(data['y_neg']),
+        'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
+    }
+
 def spmtx2tensor(spmtx):
     coo = coo_matrix(spmtx)
     idx = np.vstack((coo.row, coo.col))

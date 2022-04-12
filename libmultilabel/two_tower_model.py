@@ -84,6 +84,10 @@ class TwoTowerModel(pl.LightningModule):
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = self._weighted_sqsqloss
             self.step = self._naive_sqsq_step
+        elif self.config.loss == 'PN-SQSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = torch.nn.MSELoss(reduction='sum')
+            self.step = self._pn_step
         elif self.config.loss == 'Minibatch-LRSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.MinibatchMNLoss(
@@ -194,6 +198,21 @@ class TwoTowerModel(pl.LightningModule):
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
+    def _pn_step(self, batch, batch_idx):
+        #y_pos = batch['y_pos']
+        #y_neg = batch['y_neg']
+        ps_pos, qs_pos = self.network(batch['u_pos'], batch['v_pos'])
+        ps_neg, qs_neg = self.network(batch['u_neg'], batch['v_neg'])
+        amp_pos = self.config.nnz / ps_pos.shape[0]
+        amp_neg = self.config.nz / ps_neg.shape[0]
+        logits_pos = (ps_pos*qs_pos).sum(dim=-1)
+        logits_neg = (ps_neg*qs_neg).sum(dim=-1)
+        loss = amp_pos * self.mnloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_pos_val)) \
+                + amp_neg * self.mnloss(logits_neg, logits_neg.new_full(logits_neg.size(), self.config.sq_neg_val)) \
+                + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
     def _sogram_step(self, batch, batch_idx):
         raise NotImplementedError
         #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
@@ -287,7 +306,7 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                if self.config.loss in ['Naive-SQSQ']:
+                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
                     return self._weighted_sqsqloss(logits, target, target)
                 else:
                     return self._weighted_lrloss(logits, target, target)
@@ -296,7 +315,7 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                if self.config.loss in ['Naive-SQSQ']:
+                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
                     return self._weighted_sqsqloss(logits, target, neg_mask_tr, True)
                 else:
                     return self._weighted_lrloss(logits, target, neg_mask_tr, True)
@@ -305,7 +324,7 @@ class TwoTowerModel(pl.LightningModule):
             if self.config.loss.startswith('Linear-LR'):
                 return self._weighted_lrloss(logits, target) / self.config.l2_lambda
             else:
-                if self.config.loss in ['Naive-SQSQ']:
+                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
                     return self._weighted_sqsqloss(logits, target, pn_mask_tr)
                 else:
                     return self._weighted_lrloss(logits, target, pn_mask_tr)
@@ -359,7 +378,7 @@ class TwoTowerModel(pl.LightningModule):
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
-            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
+            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
                 loss1 = _ploss(logits)*m*n/pos_num + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -375,7 +394,7 @@ class TwoTowerModel(pl.LightningModule):
             logits, P, Q = _inner_forward(Utr, Vtr)
             w_sq = self._wnorm_sq()
 
-            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
+            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
                 loss1 = _nloss(logits)*m*n/neg_num + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -400,7 +419,7 @@ class TwoTowerModel(pl.LightningModule):
 
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _loss(logits) + 0.5 * w_sq
-            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ'):
+            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
                 loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -464,7 +483,7 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 100 == 0:
+        if self.global_step % 1000 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
