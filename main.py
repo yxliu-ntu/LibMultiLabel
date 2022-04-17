@@ -56,6 +56,8 @@ def get_config():
                         help='Path to test data (default: [data_dir]/testL.csv)')
     parser.add_argument('--testR_path',
                         help='Path to test data (default: [data_dir]/testR.csv)')
+    parser.add_argument('--mask_path', type=str, default=None,
+                        help='Path to obs mask data (default: [data_dir]/testR.csv)')
     #parser.add_argument('--val_size', type=float, default=0.2,
     #                    help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
     parser.add_argument('--shuffle', type=bool, default=True,

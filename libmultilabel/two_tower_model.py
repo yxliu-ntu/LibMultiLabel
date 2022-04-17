@@ -176,7 +176,12 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+
+        if self.config.hard_omega or self.config.mask_path is not None:
+            loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=False, mask=os) * (self.nnz + self.nz) / os._values().sum() \
+                    + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        else:
+            loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
         if self.config.reduce_mode == 'mean':
             scaler = os._nnz() if os is not None else ys.size()[0]*ys.size()[1]
             loss = loss/scaler
@@ -190,7 +195,10 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         logits = ps @ qs.T
 
-        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
+        if self.config.hard_omega or self.config.mask_path is not None:
+            amp = (self.config.nnz + self.config.nz) / os._values().sum()
+        else:
+            amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
         loss = amp * self.mnloss(logits, ys, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
         if self.config.reduce_mode == 'mean':
             raise
@@ -483,7 +491,7 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 1000 == 0:
+        if self.global_step % 10 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()

@@ -1,0 +1,27 @@
+# data
+data_name: ml-1m
+data_dir: data/ml-1m/mf_format/
+trainL_path: data/ml-1m/mf_format/tr.mf.lrank.mn
+trainR_path: data/ml-1m/mf_format/item.mf.lrank.mn
+validL_path: data/ml-1m/mf_format/tr.mf.lrank.mn
+validR_path: data/ml-1m/mf_format/item.mf.lrank.mn
+testL_path: data/ml-1m/mf_format/tr.mf.lrank.mn
+testR_path: data/ml-1m/mf_format/item.mf.lrank.mn
+
+# train
+shuffle: True
+patience: 100000000
+gradient_clip_val: 0.0
+gradient_clip_algorithm: norm
+
+# eval
+eval_bsize_i: 4096
+monitor_metrics: [P@1, P@5, P@10, P@20, P@40, R@1, R@5, R@10, R@20, R@40]
+val_metric: R@40
+
+# model
+model_name: FM2Tower
+drop_last: False
+dropout: 0.0
+k1: 4
+
