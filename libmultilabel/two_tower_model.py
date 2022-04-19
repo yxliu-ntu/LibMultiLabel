@@ -59,43 +59,46 @@ class TwoTowerModel(pl.LightningModule):
         #    logging.info(f'loss_type: {self.config.loss}')
         #    self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
         #    self.step = self._logsoftmax_step
-        if self.config.loss == 'Linear-LR':
+        if self.config.loss == 'Naive-LRLR':
             logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = self._weighted_lrloss
-            self.step = self._linearlr_step
-        elif self.config.loss == 'Naive-LRLR':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
-                    )
-            self.step = self._naive_step
+            self.ploss = torch.nn.BCEWithLogitsLoss(reduction='none')
+            self.nloss = torch.nn.BCEWithLogitsLoss(reduction='none')
+            self.mnloss = self._customize_loss
+            self.plabel = None
+            self.nlabel = None
+            self.step = self._naive_mn_step
         elif self.config.loss == 'Naive-LRSQ':
             logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    )
-            self.step = self._naive_step
+            self.ploss = torch.nn.BCEWithLogitsLoss(reduction='none')
+            self.nloss = torch.nn.MSELoss(reduction='none')
+            self.mnloss = self._customize_loss
+            self.plabel = None
+            self.nlabel = self.config.r
+            self.step = self._naive_mn_step
         elif self.config.loss == 'Naive-SQSQ':
             logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = self._weighted_sqsqloss
-            self.step = self._naive_sqsq_step
-        elif self.config.loss == 'PN-SQSQ':
+            self.ploss = torch.nn.MSELoss(reduction='none')
+            self.nloss = torch.nn.MSELoss(reduction='none')
+            self.mnloss = self._customize_loss
+            self.plabel = -self.config.r
+            self.nlabel = self.config.r
+            self.step = self._naive_mn_step
+        #elif self.config.loss == 'PN-SQSQ':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = torch.nn.MSELoss(reduction='none')
+        #    self.step = self._pn_step
+        elif self.config.loss == 'Linear-LR':
             logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = torch.nn.MSELoss(reduction='sum')
-            self.step = self._pn_step
-        elif self.config.loss == 'Minibatch-LRSQ':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.MinibatchMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    )
-            self.step = self._minibatch_step
+            self.mnloss = self._customize_loss
+            self.step = self._linearlr_step
+        #elif self.config.loss == 'Minibatch-LRSQ':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.MinibatchMNLoss(
+        #            omega=self.config.omega,
+        #            M=self.config.M,
+        #            N=self.config.N,
+        #            )
+        #    self.step = self._minibatch_step
         #elif self.config.loss == 'Sogram-LRSQ':
         #    logging.info(f'loss_type: {self.config.loss}')
         #    self.mnloss = MNLoss.SogramMNLoss(
@@ -143,6 +146,37 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
+    def _model_forward(us, vs, os):
+        if self.config.loss.startswith('Linear-LR'):
+            if os is not None:
+                raise NotImplementedError
+            P, Unorm_sq, Q, Vnorm_sq = self.network(us, vs)
+            logits = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1)
+            if self.config.isl2norm:
+                uv_norm = (Unorm_sq.unsqueeze(dim=-1) + Vnorm_sq) ** 0.5
+                logits = torch.div(logits, uv_norm)
+        else:
+            P, Q = self.network(us, vs)
+            Unorm_sq, Vnorm_sq = None, None
+            if os is not None:
+                coos = os._indices()
+                logits = torch.einsum('ij, ij->i', P[coos[0]], Q[coos[1]]).unsqueeze(dim=-1)
+            else:
+                logits = P @ Q.T
+        return logits, P, Unorm_sq, Q, Vnorm_sq
+
+    def _customize_loss(self, logits, Y):
+        coos = Y._indices()
+        logits_pos = logits[coos[0], coos[1]]
+        pplabels = logits.new_full(logits_pos.size(), self.plabel) is self.plabel is not None else (Y._values() > 0).to(logits.dtype)
+        pnlabels = logits.new_full(logits_pos.size(), self.nlabel) is self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
+        nnlabels = logits.new_full(logits.size(), self.nlabel) is self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
+        L_plus_part1 = self.ploss(logits_pos, pplabels)
+        L_plus_part2 = self.nloss(logits_pos, pnlabels)
+        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
+        L_minus = self.nloss(logits, nnlabels)
+        return L_plus.sum() + self.config.omega * L_minus.sum()
+
     def _ginfo1(self):
         gExp = []
         for param in self.parameters():
@@ -157,185 +191,101 @@ class TwoTowerModel(pl.LightningModule):
                 wnorm_sq += torch.norm(param)**2
         return wnorm_sq
 
-    def _logsoftmax_step(self, batch, batch_idx):
-        raise NotImplementedError
-        #ps, qs = self.network(batch['us'], batch['vs'])
-        #amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        #ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-        #logits = ps @ qs.T
-        #loss = amp*self.mnloss(logits, ys)
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #return loss
+    #def _naive_step(self, batch, batch_idx):
+    #    us, vs = batch['us'], batch['vs']
+    #    ys, os = batch['ys'], batch['os']
+    #    _as = batch['_as']
+    #    _bs = batch['_bs']
 
-    def _naive_step(self, batch, batch_idx):
+    #    ps, qs = self.network(batch['us'], batch['vs'])
+    #    pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+    #    qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+
+    #    if self.config.hard_omega or self.config.mask_path is not None:
+    #        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=False, mask=os) * (self.nnz + self.nz) / os._values().sum() \
+    #                + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+    #    else:
+    #        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+    #    if self.config.reduce_mode == 'mean':
+    #        scaler = os._nnz() if os is not None else ys.size()[0]*ys.size()[1]
+    #        loss = loss/scaler
+    #    logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, omega: {self.config.omega}, loss: {loss.item()}')
+    #    return loss
+
+    def _naive_mn_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
         ys, os = batch['ys'], batch['os']
-        _as = batch['_as']
-        _bs = batch['_bs']
+        if os is not None:
+            ys = ((ys - 0.5*os)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
 
-        ps, qs = self.network(batch['us'], batch['vs'])
-        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-
-        if self.config.hard_omega or self.config.mask_path is not None:
-            loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=False, mask=os) * (self.nnz + self.nz) / os._values().sum() \
-                    + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        else:
-            loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        if self.config.reduce_mode == 'mean':
-            scaler = os._nnz() if os is not None else ys.size()[0]*ys.size()[1]
-            loss = loss/scaler
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, omega: {self.config.omega}, loss: {loss.item()}')
-        return loss
-
-    def _naive_sqsq_step(self, batch, batch_idx):
-        us, vs = batch['us'], batch['vs']
-        ys, os = batch['ys'], batch['os']
-
-        ps, qs = self.network(batch['us'], batch['vs'])
-        logits = ps @ qs.T
-
-        if self.config.hard_omega or self.config.mask_path is not None:
-            amp = (self.config.nnz + self.config.nz) / os._values().sum()
-        else:
-            amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        loss = amp * self.mnloss(logits, ys, mask=os) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        if self.config.reduce_mode == 'mean':
-            raise
+        logits, _, _, _, _ = self._model_forward(us, vs, os)
+        amp = (self.config.nnz + self.config.nz) / logits.numel()
+        loss = amp * self.mnloss(logits, ys) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
-    def _pn_step(self, batch, batch_idx):
-        #y_pos = batch['y_pos']
-        #y_neg = batch['y_neg']
-        ps_pos, qs_pos = self.network(batch['u_pos'], batch['v_pos'])
-        ps_neg, qs_neg = self.network(batch['u_neg'], batch['v_neg'])
-        amp_pos = self.config.nnz / ps_pos.shape[0]
-        amp_neg = self.config.nz / ps_neg.shape[0]
-        logits_pos = (ps_pos*qs_pos).sum(dim=-1)
-        logits_neg = (ps_neg*qs_neg).sum(dim=-1)
-        loss = amp_pos * self.mnloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_pos_val)) \
-                + amp_neg * self.mnloss(logits_neg, logits_neg.new_full(logits_neg.size(), self.config.sq_neg_val)) \
-                + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        return loss
+    #def _pn_step(self, batch, batch_idx):
+    #    #y_pos = batch['y_pos']
+    #    #y_neg = batch['y_neg']
+    #    ps_pos, qs_pos = self.network(batch['u_pos'], batch['v_pos'])
+    #    ps_neg, qs_neg = self.network(batch['u_neg'], batch['v_neg'])
+    #    amp_pos = self.config.nnz / ps_pos.shape[0]
+    #    amp_neg = self.config.nz / ps_neg.shape[0]
+    #    logits_pos = (ps_pos*qs_pos).sum(dim=-1)
+    #    logits_neg = (ps_neg*qs_neg).sum(dim=-1)
+    #    loss = amp_pos * self.mnloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_pos_val)) \
+    #            + amp_neg * self.mnloss(logits_neg, logits_neg.new_full(logits_neg.size(), self.config.sq_neg_val)) \
+    #            + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+    #    logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+    #    return loss
 
-    def _sogram_step(self, batch, batch_idx):
-        raise NotImplementedError
-        #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
-        #pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        #qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        #ys = batch['ys']
-        #_as = batch['_as']
-        #_bs = batch['_bs']
-        #_abs = batch['_abs']
-        #_bbs = batch['_bbs']
-        #loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #return loss
-
-    def _weighted_sqsqloss(self, logits, Y, mask=None, isnloss=False):
-        _sqloss = F.mse_loss
-        coos = Y._indices()
-        logits_pos = logits[coos[0], coos[1]]
-        L_plus_part1 = _sqloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_pos_val), reduction='none')
-        L_plus_part2 = _sqloss(logits_pos, logits_pos.new_full(logits_pos.size(), self.config.sq_neg_val), reduction='none')
-        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
-        L_minus = _sqloss(logits, logits.new_full(logits.size(), self.config.sq_neg_val), reduction='none')
-        if mask is not None:
-            mask_coos = mask._indices()
-            L_minus = L_minus[mask_coos[0], mask_coos[1]]
-        if isnloss:
-            return self.config.omega * L_minus.sum()
-        else:
-            return L_plus.sum() + self.config.omega * L_minus.sum()
-
-    def _weighted_lrloss(self, logits, Y, mask=None, isnloss=False):
-        _lrloss = F.binary_cross_entropy_with_logits
-        coos = Y._indices()
-        logits_pos = logits[coos[0], coos[1]]
-        L_plus_part1 = _lrloss(logits_pos, (Y._values() > 0).to(logits_pos.dtype), reduction='none')
-        L_plus_part2 = _lrloss(logits_pos, logits_pos.new_zeros(logits_pos.size()), reduction='none')
-        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
-        L_minus = _lrloss(logits, logits.new_zeros(logits.size()), reduction='none')
-        if mask is not None:
-            mask_coos = mask._indices()
-            L_minus = L_minus[mask_coos[0], mask_coos[1]]
-        if isnloss:
-            return self.config.omega * L_minus.sum()
-        else:
-            return L_plus.sum() + self.config.omega * L_minus.sum()
+    #def _sogram_step(self, batch, batch_idx):
+    #    ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
+    #    pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+    #    qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+    #    ys = batch['ys']
+    #    _as = batch['_as']
+    #    _bs = batch['_bs']
+    #    _abs = batch['_abs']
+    #    _bbs = batch['_bbs']
+    #    loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
+    #    logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+    #    return loss
 
     def _linearlr_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
-        Y = batch['ys']
+        ys, os = batch['ys'], batch['os']
+        if os is not None:
+            raise NotImplementedError
 
-        ps, us_norm_sq, qs, vs_norm_sq = self.network(us, vs)
-        logits = ps.sum(dim=-1, keepdim=True) + qs.sum(dim=-1) # outer sum
-        if self.config.isl2norm:
-            uv_norm = (us_norm_sq.unsqueeze(dim=-1) + vs_norm_sq) ** 0.5 # outer sum
-            logits = torch.div(logits, uv_norm)
-
-        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        loss = (amp*self.mnloss(logits, Y) + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        logits, _, _, _, _ = self._model_forward(us, vs, os)
+        amp = (self.config.nnz + self.config.nz) / logits.numel()
+        loss = (amp*self.mnloss(logits, ys) + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
-    def _minibatch_step(self, batch, batch_idx):
-        us, vs = batch['us'], batch['vs']
-        Y = batch['ys']
-        A = batch['_as']
-        B = batch['_bs']
+    #def _minibatch_step(self, batch, batch_idx):
+    #    us, vs = batch['us'], batch['vs']
+    #    Y = batch['ys']
+    #    A = batch['_as']
+    #    B = batch['_bs']
 
-        P, Q = self.network(us, vs)
-        Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        return loss
+    #    P, Q = self.network(us, vs)
+    #    Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+    #    Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+    #    loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+    #    #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+    #    #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+    #    return loss
 
     def _calc_func_val(self): #bsize_i=8192, bsize_j=32768):
-        def _inner_forward(Utr, Vtr):
-            if self.config.loss.startswith('Linear-LR'):
-                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
-                logits = P.sum(dim=-1, keepdim=True) + Q.sum(dim=-1)
-                if self.config.isl2norm:
-                    uv_norm = (Unorm_sq.unsqueeze(dim=-1) + Vnorm_sq) ** 0.5
-                    logits = torch.div(logits, uv_norm)
-            else:
-                P, Q = self.network(Utr, Vtr)
-                logits = P @ Q.T
-            return logits, P ,Q
-
-        def _ploss(logits):
-            if self.config.loss.startswith('Linear-LR'):
-                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
-            else:
-                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
-                    return self._weighted_sqsqloss(logits, target, target)
-                else:
-                    return self._weighted_lrloss(logits, target, target)
-
-        def _nloss(logits):
-            if self.config.loss.startswith('Linear-LR'):
-                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
-            else:
-                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
-                    return self._weighted_sqsqloss(logits, target, neg_mask_tr, True)
-                else:
-                    return self._weighted_lrloss(logits, target, neg_mask_tr, True)
-
         def _loss(logits):
             if self.config.loss.startswith('Linear-LR'):
-                return self._weighted_lrloss(logits, target) / self.config.l2_lambda
+                return self.mnloss(logits, target) / self.config.l2_lambda
             else:
-                if self.config.loss in ['Naive-SQSQ', 'PN-SQSQ']:
-                    return self._weighted_sqsqloss(logits, target, pn_mask_tr)
-                else:
-                    return self._weighted_lrloss(logits, target, pn_mask_tr)
+                return self.mnloss(logits, target)
 
         save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
         save_Ytr = os.path.join(save_dir, 'Ytr.npz')
@@ -344,10 +294,10 @@ class TwoTowerModel(pl.LightningModule):
         save_jcb = os.path.join(save_dir, 'jcb_%d.npy'%self.global_step)
         save_P = os.path.join(save_dir, 'P_%d.npy'%self.global_step)
         save_Q = os.path.join(save_dir, 'Q_%d.npy'%self.global_step)
-        save_model = os.path.join(save_dir, 'model_%d.pth'%self.global_step)
+        #save_model = os.path.join(save_dir, 'model_%d.pth'%self.global_step)
         save_info = os.path.join(save_dir, 'info_%d.pth'%self.global_step)
 
-        torch.save(self.network.state_dict(), save_model)
+        #torch.save(self.network.state_dict(), save_model)
 
         fullbatch_grad_sq = 0.0
         with torch.enable_grad():
@@ -355,21 +305,11 @@ class TwoTowerModel(pl.LightningModule):
             opt.zero_grad()
 
             Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
-            m, n = self.config.M, self.config.N
-            if not os.path.isfile(save_Ytr):
-                sp.sparse.save_npz(save_Ytr, Ytr)
-
             pn_mask_tr = self.trainer.train_dataloader.dataset.datasets.pn_mask
-            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
-                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
-            if pn_mask_tr is None:
-                scaler = m*n
-                neg_mask_tr = sp.sparse.csr_matrix(1.0 - Ytr.A)
-            else:
-                scaler = pn_mask_tr.sum()
-                neg_mask_tr = pn_mask_tr - Ytr
-            pos_num = Ytr.sum()
-            neg_num = neg_mask_tr.sum()
+            m, n = self.config.M, self.config.N
+            pos_num = self.config.nnz
+            neg_num = self.config.nz
+            scaler = pos_num + neg_num
 
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
@@ -379,72 +319,31 @@ class TwoTowerModel(pl.LightningModule):
             target = spmtx2tensor(Ytr)
             if pn_mask_tr is not None:
                 pn_mask_tr = spmtx2tensor(pn_mask_tr)
-            neg_mask_tr = spmtx2tensor(neg_mask_tr)
-
-            ## Pos
-            opt.zero_grad()
-            logits, P, Q = _inner_forward(Utr, Vtr)
-            w_sq = self._wnorm_sq()
-
-            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
-                loss1 = _ploss(logits)*m*n/pos_num + 0.5 * self.config.l2_lambda * w_sq
-            else:
-                raise
-            if self.config.reduce_mode == 'mean':
-                loss1 = loss1/scaler
-
-            self.manual_backward(loss1)
-            pos_grad = self._ginfo1() # params size
-            pos_grad_sq = sum([ge.pow(2).sum().item() for ge in pos_grad]) # each param grad ** 2, sum
-
-            ## Neg
-            opt.zero_grad()
-            logits, P, Q = _inner_forward(Utr, Vtr)
-            w_sq = self._wnorm_sq()
-
-            if self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
-                loss1 = _nloss(logits)*m*n/neg_num + 0.5 * self.config.l2_lambda * w_sq
-            else:
-                raise
-            if self.config.reduce_mode == 'mean':
-                loss1 = loss1/scaler
-
-            self.manual_backward(loss1)
-            neg_grad = self._ginfo1() # params size
-            neg_grad_sq = sum([ge.pow(2).sum().item() for ge in neg_grad]) # each param grad ** 2, sum
-
-            # Pos - Neg
-            pn_grad_sq = sum([(pg - ng).pow(2).sum().item() for ng, pg in zip(neg_grad, pos_grad)]) # each param grad ** 2, sum
+                target = ((target - 0.5*pn_mask_tr)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
 
             ## Full
             opt.zero_grad()
-            logits, P, Q = _inner_forward(Utr, Vtr)
+            logits, P, _, Q, _ = self._model_forward(Utr, Vtr, pn_mask_tr)
             w_sq = self._wnorm_sq()
-            if not os.path.isfile(save_P):
-                np.save(save_P, P.detach().cpu().numpy())
-            if not os.path.isfile(save_Q):
-                np.save(save_Q, Q.detach().cpu().numpy())
 
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _loss(logits) + 0.5 * w_sq
-            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'PN-LRLR', 'PN-SQSQ'):
+            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'Naive-LRSQ', 'PN-SQSQ'):
                 loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
-            if self.config.reduce_mode == 'mean':
-                loss1 = loss1/scaler
+            #if self.config.reduce_mode == 'mean':
+            #    loss1 = loss1/scaler
 
             self.manual_backward(loss1)
             fullbatch_grad = self._ginfo1() # params size
             fullbatch_grad_sq = sum([ge.pow(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
 
-            jcb = jacobian(_loss, logits)
-            if not os.path.isfile(save_jcb):
-                np.save(save_jcb, jcb.detach().cpu().numpy())
+            jcb = jacobian(_loss, logits) # target is implicitly involved in this function.
 
-            if self.config.reduce_mode == 'mean':
-                jcb = jcb/scaler
-                w_sq = w_sq/scaler/scaler
+            #if self.config.reduce_mode == 'mean':
+            #    jcb = jcb/scaler
+            #    w_sq = w_sq/scaler/scaler
             if self.config.loss.startswith('Linear-LR'):
                 persample_grad_sq = w_sq + (scaler*jcb)**2 + 2*scaler*jcb*logits
             else:
@@ -458,33 +357,39 @@ class TwoTowerModel(pl.LightningModule):
                 persample_grad_sq += _helper(Vtr, P)
                 persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq
 
+            # save data
+            if not os.path.isfile(save_Ytr):
+                sp.sparse.save_npz(save_Ytr, Ytr)
+            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
+                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
+            np.save(save_P, P.detach().cpu().numpy())
+            np.save(save_Q, Q.detach().cpu().numpy())
+            np.save(save_jcb, jcb.detach().cpu().numpy())
             np.save(save_psg, persample_grad_sq.detach().cpu().numpy())
-            if pn_mask_tr is not None:
-                mask_coos = pn_mask_tr._indices()
-                persample_grad_sq = persample_grad_sq[mask_coos[0], mask_coos[1]]
+
+            #if pn_mask_tr is not None:
+            #    mask_coos = pn_mask_tr._indices()
+            #    persample_grad_sq = persample_grad_sq[mask_coos[0], mask_coos[1]]
             grad_var = persample_grad_sq.mean() - fullbatch_grad_sq
             opt.zero_grad()
 
-        infos = np.array([self.global_step,
-            self.current_epoch,
-            self.tr_time,
-            fullbatch_grad_sq, #gExpSq,
-            grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
-            loss1.item(), #fval[0].item(),
-            pos_grad_sq,
-            neg_grad_sq,
-            pn_grad_sq])
-        np.save(save_info, infos)
-        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}, gpos: {:.6e}, gneg: {:.6e}, gpn: {:.6e}'.format(
+        infos = np.array([
             self.global_step,
             self.current_epoch,
             self.tr_time,
             fullbatch_grad_sq, #gExpSq,
             grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
             loss1.item(), #fval[0].item(),
-            pos_grad_sq,
-            neg_grad_sq,
-            pn_grad_sq,
+            ])
+        np.save(save_info, infos)
+
+        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
+            self.global_step,
+            self.current_epoch,
+            self.tr_time,
+            fullbatch_grad_sq, #gExpSq,
+            grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
+            loss1.item(), #fval[0].item(),
             ))
         logging.debug(msg)
         print(msg)

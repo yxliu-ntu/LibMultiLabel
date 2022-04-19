@@ -110,8 +110,8 @@ def get_config():
                             'Naive-LRLR',
                             'Naive-LRSQ',
                             'Naive-SQSQ',
-                            'PN-LRLR',
-                            'PN-SQSQ',
+                            #'PN-LRLR',
+                            #'PN-SQSQ',
                             'Linear-LR',
                             #'Minibatch-LRSQ',
                             #'Sogram-LRSQ',
@@ -124,10 +124,6 @@ def get_config():
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
-    parser.add_argument('--sq_pos_val', type=float, default=1.0,
-                        help='Imputed value for the pos part of the sqsq-loss function')
-    parser.add_argument('--sq_neg_val', type=float, default=-1.0,
-                        help='Imputed value for the neg part of the sqsq-loss function')
 
     # model
     parser.add_argument('--model_name', default='ffm',
@@ -174,8 +170,8 @@ def get_config():
                         help='remove all positive samples')
     parser.add_argument('--hard_omega', action='store_true',
                         help='select negs equivalent to the omega setting')
-    parser.add_argument('--reduce_mode', default='sum', choices=['sum', 'mean'],
-                        help='use mean or sum for loss reduction')
+    #parser.add_argument('--reduce_mode', default='sum', choices=['sum', 'mean'],
+    #                    help='use mean or sum for loss reduction')
     parser.add_argument('--float64', action='store_true',
                         help='enable float64 for training')
     parser.add_argument('--close_early_stop', action='store_true',
