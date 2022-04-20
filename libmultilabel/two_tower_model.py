@@ -170,7 +170,7 @@ class TwoTowerModel(pl.LightningModule):
         logits_pos = logits[coos[0], coos[1]]
         pplabels = logits.new_full(logits_pos.size(), self.plabel) if self.plabel is not None else (Y._values() > 0).to(logits.dtype)
         pnlabels = logits.new_full(logits_pos.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
-        nnlabels = logits.new_full(logits.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
+        nnlabels = logits.new_full(logits.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits.size(), 0)
         L_plus_part1 = self.ploss(logits_pos, pplabels)
         L_plus_part2 = self.nloss(logits_pos, pnlabels)
         L_plus = L_plus_part1 - self.config.omega * L_plus_part2
