@@ -339,7 +339,7 @@ def main():
                     Y_eval=valid_loader.dataset.Yu,
                     )
 
-        trainer.fit(model, train_loader, valid_loader)
+        trainer.fit(model, train_loader)#, valid_loader)
 
 
     if test_loader is not None:

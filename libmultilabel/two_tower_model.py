@@ -73,15 +73,15 @@ class TwoTowerModel(pl.LightningModule):
             self.nloss = torch.nn.MSELoss(reduction='none')
             self.mnloss = self._customize_loss
             self.plabel = None
-            self.nlabel = self.config.r
+            self.nlabel = self.config.imp_r
             self.step = self._naive_mn_step
         elif self.config.loss == 'Naive-SQSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.ploss = torch.nn.MSELoss(reduction='none')
             self.nloss = torch.nn.MSELoss(reduction='none')
             self.mnloss = self._customize_loss
-            self.plabel = -self.config.r
-            self.nlabel = self.config.r
+            self.plabel = -self.config.imp_r
+            self.nlabel = self.config.imp_r
             self.step = self._naive_mn_step
         #elif self.config.loss == 'PN-SQSQ':
         #    logging.info(f'loss_type: {self.config.loss}')
@@ -146,7 +146,7 @@ class TwoTowerModel(pl.LightningModule):
 
         return optimizer
 
-    def _model_forward(us, vs, os):
+    def _model_forward(self, us, vs, os):
         if self.config.loss.startswith('Linear-LR'):
             if os is not None:
                 raise NotImplementedError
@@ -168,9 +168,9 @@ class TwoTowerModel(pl.LightningModule):
     def _customize_loss(self, logits, Y):
         coos = Y._indices()
         logits_pos = logits[coos[0], coos[1]]
-        pplabels = logits.new_full(logits_pos.size(), self.plabel) is self.plabel is not None else (Y._values() > 0).to(logits.dtype)
-        pnlabels = logits.new_full(logits_pos.size(), self.nlabel) is self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
-        nnlabels = logits.new_full(logits.size(), self.nlabel) is self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
+        pplabels = logits.new_full(logits_pos.size(), self.plabel) if self.plabel is not None else (Y._values() > 0).to(logits.dtype)
+        pnlabels = logits.new_full(logits_pos.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
+        nnlabels = logits.new_full(logits.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
         L_plus_part1 = self.ploss(logits_pos, pplabels)
         L_plus_part2 = self.nloss(logits_pos, pnlabels)
         L_plus = L_plus_part1 - self.config.omega * L_plus_part2
@@ -311,6 +311,11 @@ class TwoTowerModel(pl.LightningModule):
             neg_num = self.config.nz
             scaler = pos_num + neg_num
 
+            if not os.path.isfile(save_Ytr):
+                sp.sparse.save_npz(save_Ytr, Ytr)
+            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
+                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
+
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
             Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
@@ -319,6 +324,7 @@ class TwoTowerModel(pl.LightningModule):
             target = spmtx2tensor(Ytr)
             if pn_mask_tr is not None:
                 pn_mask_tr = spmtx2tensor(pn_mask_tr)
+                mask_coos = pn_mask_tr._indices()
                 target = ((target - 0.5*pn_mask_tr)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
 
             ## Full
@@ -350,18 +356,18 @@ class TwoTowerModel(pl.LightningModule):
                 def _helper(_UV, _PQ):
                     if _PQ.shape[0] == m:
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(1)**2 # (M, 1)
+                        if pn_mask_tr is not None:
+                            _PQ_norm_sq = _PQ_norm_sq[mask_coos[0], :].reshape(-1, 1)
                     else:
                         _PQ_norm_sq = torch.norm(_PQ, dim=1).unsqueeze(0)**2 # (1, N)
+                        if pn_mask_tr is not None:
+                            _PQ_norm_sq = _PQ_norm_sq[:, mask_coos[1]].reshape(-1, 1)
                     return scaler*scaler*_PQ_norm_sq*(jcb**2) + 2*self.config.l2_lambda*scaler*jcb*logits
                 persample_grad_sq =  _helper(Utr, Q)
                 persample_grad_sq += _helper(Vtr, P)
                 persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq
 
             # save data
-            if not os.path.isfile(save_Ytr):
-                sp.sparse.save_npz(save_Ytr, Ytr)
-            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
-                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
             np.save(save_P, P.detach().cpu().numpy())
             np.save(save_Q, Q.detach().cpu().numpy())
             np.save(save_jcb, jcb.detach().cpu().numpy())
