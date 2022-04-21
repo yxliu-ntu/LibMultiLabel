@@ -22,6 +22,8 @@ PAD = '**PAD**'
 def svm_data_proc(x):
     x = [(int(i.split(':')[0]), float(i.split(':')[1])) for i in x.split()]
     idx, val = zip(*x)
+    if 0 in idx:
+        raise ValueError('The feature idx should start from 0!')
     return idx, val
 
 def obj_arr_to_csr(U, max_j=None):
@@ -67,6 +69,19 @@ def generate_batch_cross(data_batch):
         '_abs': torch.Tensor(data['_abs']) if us is not None else None,
         '_bbs': torch.Tensor(data['_bbs']) if vs is not None else None,
         'ys': spmtx2tensor(data['ys']) if (us is not None and vs is not None) else None,
+        'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
+    }
+
+def generate_batch_pn(data_batch):
+    data = data_batch[0]
+    return {
+        'u_pos': spmtx2tensor(data['u_pos']),
+        'v_pos': spmtx2tensor(data['v_pos']),
+        'u_neg': spmtx2tensor(data['u_neg']),
+        'v_neg': spmtx2tensor(data['v_neg']),
+        'y_pos': spmtx2tensor(data['y_pos']),
+        'y_neg': spmtx2tensor(data['y_neg']),
+        'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
     }
 
 def spmtx2tensor(spmtx):

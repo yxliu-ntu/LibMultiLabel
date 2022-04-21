@@ -56,6 +56,8 @@ def get_config():
                         help='Path to test data (default: [data_dir]/testL.csv)')
     parser.add_argument('--testR_path',
                         help='Path to test data (default: [data_dir]/testR.csv)')
+    parser.add_argument('--mask_path', type=str, default=None,
+                        help='Path to obs mask data (default: [data_dir]/testR.csv)')
     #parser.add_argument('--val_size', type=float, default=0.2,
     #                    help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
     parser.add_argument('--shuffle', type=bool, default=True,
@@ -72,12 +74,18 @@ def get_config():
                         help='Number of total steps to train (default: %(default)s), use this first when epochs and total_steps are all set')
     #parser.add_argument('--warmup_steps', type=int, default=0.0,
     #                    help='Number of warm-up steps for training (default: %(default)s)')
+    parser.add_argument('--np_ratio', type=int, default=None,
+                        help='neg vs pos ratio of training samples (default: %(default)s)')
     parser.add_argument('--bratio', type=float, default=None,
                         help='batch ratio of training samples for Sogram (default: %(default)s)')
     parser.add_argument('--bsize_i', type=int, default=16,
                         help='Size of training batches along rows of label matrix (default: %(default)s)')
     parser.add_argument('--bsize_j', type=int, default=None,
                         help='Size of training batches along cols of label matrix (default: %(default)s)')
+    parser.add_argument('--pos_bs', type=int, default=1,
+                        help='Size of training batches of positive samples (default: %(default)s)')
+    parser.add_argument('--neg_bs', type=int, default=1,
+                        help='Size of training batches of negative samples (default: %(default)s)')
     parser.add_argument('--optimizer', default='adagrad', choices=['adam', 'sgd', 'adamw', 'adagrad'],
                         help='Optimizer: SGD or Adam (default: %(default)s)')
     parser.add_argument('--learning_rate', type=float, default=0.0001,
@@ -98,13 +106,16 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            'Naive-LogSoftmax',
+                            #'Naive-LogSoftmax',
                             'Naive-LRLR',
                             'Naive-LRSQ',
+                            'Naive-SQSQ',
+                            'PN-LRLR',
+                            'PN-SQSQ',
                             'Linear-LR',
-                            'Minibatch-LRSQ',
-                            'Sogram-LRSQ',
-                            ], 
+                            #'Minibatch-LRSQ',
+                            #'Sogram-LRSQ',
+                            ],
                         default=None,
                         help='Type of loss function. All only support two-tower models.')
     parser.add_argument('--omega', type=float, default=1.0,
@@ -113,12 +124,18 @@ def get_config():
                         help='Weight for updating Gramian')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
+    parser.add_argument('--sq_pos_val', type=float, default=1.0,
+                        help='Imputed value for the pos part of the sqsq-loss function')
+    parser.add_argument('--sq_neg_val', type=float, default=-1.0,
+                        help='Imputed value for the neg part of the sqsq-loss function')
 
     # model
     parser.add_argument('--model_name', default='ffm',
                         help='Model to be used (default: %(default)s)')
     parser.add_argument('--init_weight', default='kaiming_uniform',
                         help='Weight initialization to be used (default: %(default)s)')
+    parser.add_argument('--init_weight_path', default=None,
+                        help='path of .pth for Weight initialization (default: %(default)s)')
     parser.add_argument('--activation', default='relu',
                         help='Activation function to be used (default: %(default)s)')
     parser.add_argument('--k', type=int, default=128,
@@ -153,6 +170,12 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--no_pos', action='store_true',
+                        help='remove all positive samples')
+    parser.add_argument('--hard_omega', action='store_true',
+                        help='select negs equivalent to the omega setting')
+    parser.add_argument('--reduce_mode', default='sum', choices=['sum', 'mean'],
+                        help='use mean or sum for loss reduction')
     parser.add_argument('--float64', action='store_true',
                         help='enable float64 for training')
     parser.add_argument('--close_early_stop', action='store_true',
@@ -178,7 +201,12 @@ def get_config():
     #for i in ['trainL', 'trainR', 'validL', 'validR', 'testL', 'testR']:
     #    if config['%s_path'%i] is None:
     #        config['%s_path'%i] = os.path.join(config.data_dir, '%s.csv'%i)
-    config['dataset_type'] = 'nonzero' if 'Sogram' in config.loss else 'cross'
+    if 'Sogram' in config.loss:
+        config['dataset_type'] = 'nonzero'
+    elif 'PN' in config.loss:
+        config['dataset_type'] = 'pn'
+    else:
+        config['dataset_type'] = 'cross'
     return config
 
 def setup_loggers(log_path:str, is_silent: bool):
@@ -218,6 +246,7 @@ def main():
         datetime.now().strftime('%Y%m%d%H%M%S'),
     )
     config['is_sogram'] = 'Sogram' in config.loss
+    config['is_pn'] = 'PN' in config.loss
 
     ## Build model, set logger and checkpoint
     _Model = TwoTowerModel
@@ -246,6 +275,7 @@ def main():
             data_utils.svm_data_proc,
             data_utils.svm_data_proc,
             data_utils.generate_batch_cross,
+            data_utils.generate_batch_pn,
             data_utils.generate_batch_sogram,
             rng=rng,
             )
@@ -262,11 +292,15 @@ def main():
             loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U, train_loader.dataset.U.shape[1])
             loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V, train_loader.dataset.V.shape[1])
     config['nnz'] = train_loader.dataset.nnz
+    config['nz'] = train_loader.dataset.nz
     config['M'] = train_loader.dataset.U.shape[0]
     config['N'] = train_loader.dataset.V.shape[0]
     config['Du'] = train_loader.dataset.U.shape[1]
     config['Dv'] = train_loader.dataset.V.shape[1]
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
+
+    if config.hard_omega:
+        config.omega = 1.0
 
     config['val_check_interval'] = min(len(train_loader), 100) if len(train_loader) < 1000 else 1000 #math.ceil(len(train_loader)/100.)
     if config.total_steps is None:
