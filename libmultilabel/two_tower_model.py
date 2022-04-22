@@ -313,8 +313,6 @@ class TwoTowerModel(pl.LightningModule):
 
             if not os.path.isfile(save_Ytr):
                 sp.sparse.save_npz(save_Ytr, Ytr)
-            if pn_mask_tr is not None and (not os.path.isfile(save_pn_mask_tr)):
-                sp.sparse.save_npz(save_pn_mask_tr, pn_mask_tr)
 
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
@@ -325,7 +323,10 @@ class TwoTowerModel(pl.LightningModule):
             if pn_mask_tr is not None:
                 pn_mask_tr = spmtx2tensor(pn_mask_tr)
                 mask_coos = pn_mask_tr._indices()
-                target = ((target - 0.5*pn_mask_tr)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
+                target = ((target - 0.5*pn_mask_tr)._values() + 0.5).unsqueeze(dim=-1) # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
+                if not os.path.isfile(save_pn_mask_tr):
+                    sp.sparse.save_npz(save_pn_mask_tr, sp.sparse.csr_matrix(target.detach().cpu().numpy()))
+                target = target.to_sparse()
 
             ## Full
             opt.zero_grad()
