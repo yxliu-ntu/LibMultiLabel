@@ -84,6 +84,15 @@ def generate_batch_pn(data_batch):
         'os': spmtx2tensor(data['os']) if data['os'] is not None else None,
     }
 
+def generate_batch_mask(data_batch):
+    data = data_batch[0]
+    return {
+        'us': spmtx2tensor(data['us']),
+        'vs': spmtx2tensor(data['vs']),
+        'ys': torch.Tensor(data['ys']).flatten(),
+        'os': torch.Tensor(data['os']).flatten() if data['os'] is not None else None,
+    }
+
 def spmtx2tensor(spmtx):
     coo = coo_matrix(spmtx)
     idx = np.vstack((coo.row, coo.col))

@@ -110,6 +110,7 @@ def get_config():
                             'Naive-LRLR',
                             'Naive-LRSQ',
                             'Naive-SQSQ',
+                            'Mask-SQSQ',
                             #'PN-LRLR',
                             #'PN-SQSQ',
                             'Linear-LR',
@@ -201,6 +202,8 @@ def get_config():
         config['dataset_type'] = 'nonzero'
     elif 'PN' in config.loss:
         config['dataset_type'] = 'pn'
+    elif 'Mask' in config.loss:
+        config['dataset_type'] = 'mask'
     else:
         config['dataset_type'] = 'cross'
     return config
@@ -272,6 +275,7 @@ def main():
             data_utils.svm_data_proc,
             data_utils.generate_batch_cross,
             data_utils.generate_batch_pn,
+            data_utils.generate_batch_mask,
             data_utils.generate_batch_sogram,
             rng=rng,
             )

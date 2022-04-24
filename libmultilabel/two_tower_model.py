@@ -83,6 +83,14 @@ class TwoTowerModel(pl.LightningModule):
             self.plabel = -self.config.imp_r
             self.nlabel = self.config.imp_r
             self.step = self._naive_mn_step
+        elif self.config.loss == 'Mask-SQSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.ploss = torch.nn.MSELoss(reduction='none')
+            self.nloss = torch.nn.MSELoss(reduction='none')
+            self.mnloss = self._customize_loss
+            self.plabel = -self.config.imp_r
+            self.nlabel = self.config.imp_r
+            self.step = self._mask_step
         #elif self.config.loss == 'PN-SQSQ':
         #    logging.info(f'loss_type: {self.config.loss}')
         #    self.mnloss = torch.nn.MSELoss(reduction='none')
@@ -225,6 +233,16 @@ class TwoTowerModel(pl.LightningModule):
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
+    def _mask_step(self, batch, batch_idx):
+        ps, qs = self.network(batch['us'], batch['vs'])
+        ys, os = batch['ys'], batch['os']
+        logits = (ps*qs).sum(dim=-1)
+        ys = (1 - 2*ys)*self.config.imp_r # 1 - 2*(1, 0) -> (-1, 1)
+        amp = (self.config.nnz + self.config.nz) / logits.shape[0]
+        loss = amp * self.ploss(logits, ys).sum() + 0.5*self.config.l2_lambda*self._wnorm_sq()
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
+
     #def _pn_step(self, batch, batch_idx):
     #    #y_pos = batch['y_pos']
     #    #y_neg = batch['y_neg']
@@ -335,7 +353,7 @@ class TwoTowerModel(pl.LightningModule):
 
             if self.config.loss.startswith('Linear-LR'):
                 loss1 = _loss(logits) + 0.5 * w_sq
-            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'Naive-LRSQ', 'PN-SQSQ'):
+            elif self.config.loss in ('Naive-LRLR', 'Naive-SQSQ', 'Naive-LRSQ', 'PN-SQSQ', 'Mask-SQSQ'):
                 loss1 = _loss(logits) + 0.5 * self.config.l2_lambda * w_sq
             else:
                 raise
@@ -403,7 +421,7 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 10 == 0:
+        if self.global_step % 100 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
