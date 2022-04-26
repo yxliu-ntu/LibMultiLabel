@@ -123,6 +123,8 @@ def get_config():
                         help='Cost weight for the negative part of the loss function')
     parser.add_argument('--alpha', type=float, default=1.0,
                         help='Weight for updating Gramian')
+    parser.add_argument('--pos_r', type=float, default=None,
+                        help='Imputed value for the pos part of the loss function')
     parser.add_argument('--imp_r', type=float, default=0.0,
                         help='Imputed value for the negative part of the loss function')
 
@@ -167,6 +169,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--use_ys', action='store_true',
+                        help='use the original label values of all positive samples for SQSQ')
     parser.add_argument('--no_pos', action='store_true',
                         help='remove all positive samples')
     parser.add_argument('--hard_omega', action='store_true',

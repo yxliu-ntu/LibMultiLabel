@@ -80,7 +80,7 @@ class TwoTowerModel(pl.LightningModule):
             self.ploss = torch.nn.MSELoss(reduction='none')
             self.nloss = torch.nn.MSELoss(reduction='none')
             self.mnloss = self._customize_loss
-            self.plabel = -self.config.imp_r
+            self.plabel = -self.config.imp_r if self.config.pos_r is None else self.config.pos_r
             self.nlabel = self.config.imp_r
             self.step = self._naive_mn_step
         elif self.config.loss == 'Mask-SQSQ':
@@ -88,7 +88,8 @@ class TwoTowerModel(pl.LightningModule):
             self.ploss = torch.nn.MSELoss(reduction='none')
             self.nloss = torch.nn.MSELoss(reduction='none')
             self.mnloss = self._customize_loss
-            self.plabel = -self.config.imp_r
+            assert not self.config.use_ys
+            self.plabel = -self.config.imp_r if self.config.pos_r is None else self.config.pos_r
             self.nlabel = self.config.imp_r
             self.step = self._mask_step
         #elif self.config.loss == 'PN-SQSQ':
@@ -176,7 +177,10 @@ class TwoTowerModel(pl.LightningModule):
     def _customize_loss(self, logits, Y):
         coos = Y._indices()
         logits_pos = logits[coos[0], coos[1]]
-        pplabels = logits.new_full(logits_pos.size(), self.plabel) if self.plabel is not None else (Y._values() > 0).to(logits.dtype)
+        if self.config.loss.endswith('SQSQ') and self.config.use_ys:
+            pplabels = Y._values()
+        else:
+            pplabels = logits.new_full(logits_pos.size(), self.plabel) if self.plabel is not None else (Y._values() > 0).to(logits.dtype)
         pnlabels = logits.new_full(logits_pos.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits_pos.size(), 0)
         nnlabels = logits.new_full(logits.size(), self.nlabel) if self.nlabel is not None else logits.new_full(logits.size(), 0)
         L_plus_part1 = self.ploss(logits_pos, pplabels)
@@ -224,7 +228,7 @@ class TwoTowerModel(pl.LightningModule):
         us, vs = batch['us'], batch['vs']
         ys, os = batch['ys'], batch['os']
         if os is not None:
-            ys = ((ys - 0.5*os)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
+            ys = ((ys - 0.5*os)._values() + 0.5).unsqueeze(dim=-1).to_sparse() # (pos, -1, 0) - 0.5 + 0.5-> (pos - 0.5, -1.5, -0.5) + 0.5 -> (pos, -1, 0)
 
         logits, _, _, _, _ = self._model_forward(us, vs, os)
         amp = (self.config.nnz + self.config.nz) / logits.numel()
@@ -238,6 +242,8 @@ class TwoTowerModel(pl.LightningModule):
         ys, os = batch['ys'], batch['os']
         logits = (ps*qs).sum(dim=-1)
         ys = (1 - 2*ys)*self.config.imp_r # 1 - 2*(1, 0) -> (-1, 1)
+        if self.config.pos_r is not None:
+            ys[ys == -self.config.imp_r] = self.config.pos_r
         amp = (self.config.nnz + self.config.nz) / logits.shape[0]
         loss = amp * self.ploss(logits, ys).sum() + 0.5*self.config.l2_lambda*self._wnorm_sq()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
@@ -421,7 +427,9 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step % 100 == 0:
+        if self.global_step < 1000 and self.global_step % 10 == 0:
+            self._calc_func_val()
+        elif self.global_step % 1000 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
