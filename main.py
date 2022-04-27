@@ -210,6 +210,9 @@ def get_config():
         config['dataset_type'] = 'mask'
     else:
         config['dataset_type'] = 'cross'
+
+    if config.imp_r == 0:
+        assert config.use_ys or config.pos_r is not None
     return config
 
 def setup_loggers(log_path:str, is_silent: bool):

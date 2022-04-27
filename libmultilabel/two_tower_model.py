@@ -88,7 +88,6 @@ class TwoTowerModel(pl.LightningModule):
             self.ploss = torch.nn.MSELoss(reduction='none')
             self.nloss = torch.nn.MSELoss(reduction='none')
             self.mnloss = self._customize_loss
-            assert not self.config.use_ys
             self.plabel = -self.config.imp_r if self.config.pos_r is None else self.config.pos_r
             self.nlabel = self.config.imp_r
             self.step = self._mask_step
@@ -241,9 +240,12 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         ys, os = batch['ys'], batch['os']
         logits = (ps*qs).sum(dim=-1)
-        ys = (1 - 2*ys)*self.config.imp_r # 1 - 2*(1, 0) -> (-1, 1)
-        if self.config.pos_r is not None:
-            ys[ys == -self.config.imp_r] = self.config.pos_r
+        ys[ys == 0] = self.config.imp_r #(y, 0) -> (y, imp_r)
+        if not self.config.use_ys:
+            if self.config.pos_r is not None:
+                ys[ys != 0] = self.config.pos_r # (y, imp_r) -> (pos_r, imp_r)
+            else:
+                ys[ys != 0] = -self.config.imp_r #(y, imp_r) -> (-imp_r, imp_r)
         amp = (self.config.nnz + self.config.nz) / logits.shape[0]
         loss = amp * self.ploss(logits, ys).sum() + 0.5*self.config.l2_lambda*self._wnorm_sq()
         logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
@@ -427,9 +429,9 @@ class TwoTowerModel(pl.LightningModule):
         return
 
     def training_step(self, batch, batch_idx):
-        if self.global_step < 1000 and self.global_step % 10 == 0:
+        if self.global_step < 10000 and self.global_step % 100 == 0:
             self._calc_func_val()
-        elif self.global_step % 1000 == 0:
+        elif self.global_step % 10000 == 0:
             self._calc_func_val()
         opt = self.optimizers()
         opt.zero_grad()
