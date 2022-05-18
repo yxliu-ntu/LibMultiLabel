@@ -96,7 +96,7 @@ def get_config():
                         help='Epsilon factor for adagrad (default: %(default)s)')
     parser.add_argument('--l2_lambda', type=float, default=0,
                         help='L2 regularization factor (default: %(default)s)')
-    parser.add_argument('--momentum', type=float, default=0.9,
+    parser.add_argument('--momentum', type=float, default=0.,
                         help='Momentum factor for SGD only (default: %(default)s)')
     parser.add_argument('--patience', type=int, default=5,
                         help='Number of epochs to wait for improvement before early stopping (default: %(default)s)')
