@@ -105,3 +105,18 @@ def dense_to_sparse(dense: torch.Tensor):
     values = dense[indices[0], indices[1]] # modify this based on dimensionality
     return torch.sparse_coo_tensor(indices, values, dense.size(), dtype=dense.dtype, device=dense.device)
 
+def save_params(save_fn, path_data, dosave=True, overwrite=True, switch=False):
+    if not dosave:
+        return
+    if switch:
+        flag = 1 # 1-1=0, 1-0=1
+    else:
+        flag = 0 # 0-1=-1, 0-0=0
+    if os.path.isfile(save_pn_mask_tr):
+        if overwrite:
+            save_fn(path_data[flag-1], path_data[flag-0])
+        else:
+            pass # do nothing
+    else:
+        save_fn(path_data[flag-1], path_data[flag-0])
+    return

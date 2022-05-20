@@ -8,8 +8,8 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from tqdm import trange
 
+from tqdm import trange
 from abc import abstractmethod
 from argparse import Namespace
 from torch.optim.lr_scheduler import LambdaLR
@@ -19,10 +19,11 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
-from .utils import dump_log, argsort_top_k, dense_to_sparse
+from .utils import dump_log, argsort_top_k, dense_to_sparse, save_params
 from .data_utils import spmtx2tensor
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import normalize
+from functools import partial
 
 
 class TwoTowerModel(pl.LightningModule):
@@ -188,11 +189,17 @@ class TwoTowerModel(pl.LightningModule):
         L_minus = self.nloss(logits, nnlabels)
         return L_plus.sum() + self.config.omega * L_minus.sum()
 
-    def _ginfo1(self):
-        gExp = []
+    def _ginfo1(self, reduction=False):
+        if reduction:
+            gExp= 0.0
+        else:
+            gExp = []
         for param in self.parameters():
             if param.requires_grad:
-                gExp.append(param.grad.detach().clone())
+                if not reduction:
+                    gExp.append(param.grad.detach().clone())
+                else:
+                    gExp += param.grad.detach().pow(2).sum().item()
         return gExp # [P.grad, Q.grad]
 
     def _wnorm_sq(self):
@@ -232,7 +239,7 @@ class TwoTowerModel(pl.LightningModule):
         logits, _, _, _, _ = self._model_forward(us, vs, os)
         amp = (self.config.nnz + self.config.nz) / logits.numel()
         loss = amp * self.mnloss(logits, ys) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
@@ -248,7 +255,7 @@ class TwoTowerModel(pl.LightningModule):
                 ys[ys != 0] = -self.config.imp_r #(y, imp_r) -> (-imp_r, imp_r)
         amp = (self.config.nnz + self.config.nz) / logits.shape[0]
         loss = amp * self.ploss(logits, ys).sum() + 0.5*self.config.l2_lambda*self._wnorm_sq()
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     #def _pn_step(self, batch, batch_idx):
@@ -288,7 +295,7 @@ class TwoTowerModel(pl.LightningModule):
         logits, _, _, _, _ = self._model_forward(us, vs, os)
         amp = (self.config.nnz + self.config.nz) / logits.numel()
         loss = (amp*self.mnloss(logits, ys) + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
@@ -312,6 +319,8 @@ class TwoTowerModel(pl.LightningModule):
                 return self.mnloss(logits, target) / self.config.l2_lambda
             else:
                 return self.mnloss(logits, target)
+
+        _save_params = partial(save_params, dosave=False, overwrite=False, switch=False)
 
         save_dir = os.path.join(self.config.tfboard_log_dir, self.config.run_name)
         save_Ytr = os.path.join(save_dir, 'Ytr.npz')
@@ -337,8 +346,7 @@ class TwoTowerModel(pl.LightningModule):
             neg_num = self.config.nz
             scaler = pos_num + neg_num
 
-            if not os.path.isfile(save_Ytr):
-                sp.sparse.save_npz(save_Ytr, Ytr)
+            _save_params(sp.sparse.save_npz, (save_Ytr, Ytr))
 
             #start_time = time.time()
             Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
@@ -350,8 +358,7 @@ class TwoTowerModel(pl.LightningModule):
                 pn_mask_tr = spmtx2tensor(pn_mask_tr)
                 mask_coos = pn_mask_tr._indices()
                 target = ((target - 0.5*pn_mask_tr)._values() + 0.5).unsqueeze(dim=-1) # (1, -1, 0) - 0.5 + 0.5-> (0.5, -1.5, -0.5) + 0.5 -> (1, -1, 0)
-                if not os.path.isfile(save_pn_mask_tr):
-                    sp.sparse.save_npz(save_pn_mask_tr, sp.sparse.csr_matrix(target.detach().cpu().numpy()))
+                _save_params(sp.sparse.save_npz, (save_pn_mask_tr, sp.sparse.csr_matrix(target.detach().cpu().numpy())))
                 target = target.to_sparse()
 
             ## Full
@@ -369,8 +376,9 @@ class TwoTowerModel(pl.LightningModule):
             #    loss1 = loss1/scaler
 
             self.manual_backward(loss1)
-            fullbatch_grad = self._ginfo1() # params size
-            fullbatch_grad_sq = sum([ge.pow(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
+            #fullbatch_grad = self._ginfo1() # params size
+            #fullbatch_grad_sq = sum([ge.pow(2).sum().item() for ge in fullbatch_grad]) # each param grad ** 2, sum
+            fullbatch_grad_sq = self._ginfo1(reduction=True) # params size
 
             jcb = jacobian(_loss, logits) # target is implicitly involved in this function.
 
@@ -395,10 +403,10 @@ class TwoTowerModel(pl.LightningModule):
                 persample_grad_sq += self.config.l2_lambda*self.config.l2_lambda* w_sq
 
             # save data
-            np.save(save_P, P.detach().cpu().numpy())
-            np.save(save_Q, Q.detach().cpu().numpy())
-            np.save(save_jcb, jcb.detach().cpu().numpy())
-            np.save(save_psg, persample_grad_sq.detach().cpu().numpy())
+            _save_params(np.save, (save_P, P.detach().cpu().numpy()))
+            _save_params(np.save, (save_Q, Q.detach().cpu().numpy()))
+            _save_params(np.save, (save_jcb, jcb.detach().cpu().numpy()))
+            _save_params(np.save, (save_psg, persample_grad_sq.detach().cpu().numpy()))
 
             #if pn_mask_tr is not None:
             #    mask_coos = pn_mask_tr._indices()
@@ -414,7 +422,7 @@ class TwoTowerModel(pl.LightningModule):
             grad_var.item(), #gVar.item(), #if self.config.check_grad_var else np.nan,
             loss1.item(), #fval[0].item(),
             ])
-        np.save(save_info, infos)
+        _save_params(np.save, (save_info, infos))
 
         msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gradExpSq: {:.6e}, gVar: {:.6e}, func_val: {:.6e}'.format(
             self.global_step,
@@ -440,7 +448,11 @@ class TwoTowerModel(pl.LightningModule):
         self.manual_backward(loss)
         opt.step()
         self.tr_time += time.time() - start_time
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        if self.config.check_current_grad:
+            current_grad_sq = self._ginfo1(reduction=True) # params size
+            logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, cgrad_sq: {current_grad_sq:e}, closs: {loss.item():e}')
+        else:
+            logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, closs: {loss.item():e}')
         return loss
 
     def validation_step(self, batch, batch_idx):

@@ -169,6 +169,8 @@ def get_config():
     # others
     parser.add_argument('--cpu', action='store_true',
                         help='Disable CUDA')
+    parser.add_argument('--check_current_grad', action='store_true',
+                        help='use check the square of current grad norm')
     parser.add_argument('--use_ys', action='store_true',
                         help='use the original label values of all positive samples for SQSQ')
     parser.add_argument('--no_pos', action='store_true',
