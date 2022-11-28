@@ -98,10 +98,9 @@ def get_config():
                         help='value means clip_by_value, norm means clip_by_norm. Default: norm')
     parser.add_argument('--loss', type=str,
                         choices=[
-                            'Naive-LogSoftmax',
+                            #'Naive-LogSoftmax',
                             'Naive-LRLR',
                             'Naive-LRSQ',
-                            'Linear-LR',
                             'Minibatch-LRSQ',
                             'Sogram-LRSQ',
                             ], 
@@ -276,7 +275,7 @@ def main():
             #logger=tb_logger,
             num_sanity_val_steps=0,
             gpus=0 if config.cpu else 1,
-            progress_bar_refresh_rate=0 if config.silent else 1,
+            #progress_bar_refresh_rate=0 if config.silent else 1,
             max_steps=config.total_steps,
             gradient_clip_val=config.gradient_clip_val,
             gradient_clip_algorithm=config.gradient_clip_algorithm,

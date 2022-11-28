@@ -11,11 +11,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
-from torchtext.vocab import Vocab
 from tqdm import tqdm
 from .MNLoss import NonzeroDataset, CrossDataset, CrossRandomBatchSampler
 
-UNK = Vocab.UNK
+UNK = '<unk>'
 PAD = '**PAD**'
 
 
@@ -42,19 +41,18 @@ def newtokenize(text, word_dict, max_seq_length):
     return [word_dict[t.lower()] for t in tokenizer.tokenize(text) if not t.isnumeric()][:max_seq_length]
 
 def generate_batch_sogram(data_batch):
-    raise NotImplementedError
-    #data = data_batch[0]
-    #us = [torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['u']]
-    #vs = [torch.LongTensor(v) for v in data['v']]
-    #return {
-    #    'us': pad_sequence(us, batch_first=True),
-    #    'vs': pad_sequence(vs, batch_first=True),
-    #    '_as':  torch.Tensor(data['_a']),
-    #    '_bs':  torch.Tensor(data['_b']),
-    #    '_abs': torch.Tensor(data['_ab']),
-    #    '_bbs': torch.Tensor(data['_bb']),
-    #    'ys': torch.Tensor(data['y'].A1.ravel()),
-    #}
+    data = data_batch[0]
+    us = data['u'] #[torch.LongTensor(u) if isinstance(u, list) else torch.LongTensor(u.tolist()) for u in data['u']]
+    vs = data['v'] #[torch.LongTensor(v) for v in data['v']]
+    return {
+        'us': spmtx2tensor(us),
+        'vs': spmtx2tensor(vs),
+        '_as':  torch.Tensor(data['_a']),
+        '_bs':  torch.Tensor(data['_b']),
+        '_abs': torch.Tensor(data['_ab']),
+        '_bbs': torch.Tensor(data['_bb']),
+        'ys': torch.Tensor(data['y'].A1.ravel()),
+    }
 
 def generate_batch_cross(data_batch):
     data = data_batch[0]

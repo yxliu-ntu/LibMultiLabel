@@ -45,11 +45,7 @@ class TwoTowerModel(pl.LightningModule):
         #    logging.info(f'loss_type: {self.config.loss}')
         #    self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
         #    self.step = self._logsoftmax_step
-        if self.config.loss == 'Linear-LR':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = self._weighted_lrloss
-            self.step = self._linearlr_step
-        elif self.config.loss == 'Naive-LRLR':
+        if self.config.loss == 'Naive-LRLR':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.NaiveMNLoss(
                     omega=self.config.omega,
@@ -74,16 +70,21 @@ class TwoTowerModel(pl.LightningModule):
                     N=self.config.N,
                     )
             self.step = self._minibatch_step
-        #elif self.config.loss == 'Sogram-LRSQ':
-        #    logging.info(f'loss_type: {self.config.loss}')
-        #    self.mnloss = MNLoss.SogramMNLoss(
-        #            self.config.k,
-        #            self.config.k1,
-        #            alpha=self.config.alpha,
-        #            omega=self.config.omega,
-        #            nnz=self.config.nnz
-        #            )
-        #    self.step = self._sogram_step
+        elif self.config.loss == 'Sogram-LRSQ':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.fmnloss = MNLoss.SogramMNLoss(
+                    self.config.k,
+                    self.config.k1,
+                    alpha=self.config.alpha,
+                    omega=self.config.omega,
+                    nnz=self.config.nnz
+                    )
+            self.mnloss = MNLoss.MinibatchMNLoss(
+                    omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
+                    )
+            self.step = self._sogram_step
         else:
             raise
 
@@ -105,7 +106,6 @@ class TwoTowerModel(pl.LightningModule):
                                    weight_decay=self.config.weight_decay,
                                    lr=self.config.learning_rate,
                                    initial_accumulator_value=0.1,
-                                   #eps=1e-7)
                                    eps=self.config.eps)
             print('opt:%s'%optimizer_name, 'eps:%f'%self.config.eps)
         elif optimizer_name == 'adam':
@@ -162,18 +162,17 @@ class TwoTowerModel(pl.LightningModule):
         return loss
 
     def _sogram_step(self, batch, batch_idx):
-        raise NotImplementedError
-        #ps, qs = self.network(batch['us'], batch['vs'], batch['uvals'], batch['vvals'])
-        #pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-        #qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        #ys = batch['ys']
-        #_as = batch['_as']
-        #_bs = batch['_bs']
-        #_abs = batch['_abs']
-        #_bbs = batch['_bbs']
-        #loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #return loss
+        ps, qs = self.network(batch['us'], batch['vs'])#, batch['uvals'], batch['vvals'])
+        pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+        qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+        ys = batch['ys']
+        _as = batch['_as']
+        _bs = batch['_bs']
+        _abs = batch['_abs']
+        _bbs = batch['_bbs']
+        loss = self.fmnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        return loss
 
     def _weighted_lrloss(self, logits, Y):
         _lrloss = F.binary_cross_entropy_with_logits
@@ -184,22 +183,6 @@ class TwoTowerModel(pl.LightningModule):
         L_plus = L_plus_part1 - self.config.omega * L_plus_part2
         L_minus = _lrloss(logits, logits.new_zeros(logits.size()), reduction='none')
         return L_plus.sum() + self.config.omega * L_minus.sum()
-
-    def _linearlr_step(self, batch, batch_idx):
-        us, vs = batch['us'], batch['vs']
-        Y = batch['ys']
-
-        ps, us_norm_sq, qs, vs_norm_sq = self.network(us, vs)
-        logits = ps.sum(dim=-1, keepdim=True) + qs.sum(dim=-1) # outer sum
-        if self.config.isl2norm:
-            uv_norm = (us_norm_sq.unsqueeze(dim=-1) + vs_norm_sq) ** 0.5 # outer sum
-            logits = torch.div(logits, uv_norm)
-
-        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        loss = (amp*self.mnloss(logits, Y) + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        return loss
 
     def _minibatch_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
@@ -227,12 +210,9 @@ class TwoTowerModel(pl.LightningModule):
             segment_n = math.ceil(n/bsize_j)
 
             P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-            if self.config.loss.startswith('Linear-LR'):
-                P, Unorm_sq, Q, Vnorm_sq = self.network(Utr, Vtr)
-            else:
-                P, Q = self.network(Utr, Vtr)
-                Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-                Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
+            P, Q = self.network(Utr, Vtr)
+            Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
+            Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
 
             func_val = torch.tensor(0.)
             for i in range(segment_m):
@@ -241,45 +221,35 @@ class TwoTowerModel(pl.LightningModule):
                 target = spmtx2tensor(Ytr[i_start:i_end])
                 for j in range(segment_n):
                     j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                    if self.config.loss.startswith('Linear-LR'):
-                        logits[:, j_start:j_end] = P[i_start:i_end].sum(dim=-1, keepdim=True) + Q[j_start:j_end].sum(dim=-1)
-                        if self.config.isl2norm:
-                            uv_norm = (Unorm_sq[i_start:i_end].unsqueeze(dim=-1) + Vnorm_sq[j_start:j_end]) ** 0.5
-                            logits[:, j_start:j_end] = torch.div(logits[:, j_start:j_end], uv_norm)
-                        func_val = func_val + self.mnloss(logits, target)
+                    if self.config.loss.startswith('Naive'):
+                        func_val = func_val + self.mnloss(
+                                target,
+                                Atr[i_start:i_end],
+                                Btr[j_start:j_end],
+                                P[i_start:i_end],
+                                Q[j_start:j_end],
+                                Pt[i_start:i_end],
+                                Qt[j_start:j_end],
+                                isscaling=False,
+                                )
                     else:
-                        if self.config.loss.startswith('Naive'):
-                            func_val = func_val + self.mnloss(
-                                    target,
-                                    Atr[i_start:i_end],
-                                    Btr[j_start:j_end],
-                                    P[i_start:i_end],
-                                    Q[j_start:j_end],
-                                    Pt[i_start:i_end],
-                                    Qt[j_start:j_end],
-                                    isscaling=False,
-                                    )
-                        else:
-                            func_val = func_val + self.mnloss(
-                                    target,
-                                    Atr[i_start:i_end],
-                                    Btr[j_start:j_end],
-                                    P[i_start:i_end],
-                                    Q[j_start:j_end],
-                                    Pt[i_start:i_end],
-                                    Qt[j_start:j_end],
-                                    )
-            if self.config.loss.startswith('Linear-LR'):
-                func_val = (func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()) / self.config.l2_lambda
-            else:
-                func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+                        func_val = func_val + self.mnloss(
+                                target,
+                                Atr[i_start:i_end],
+                                Btr[j_start:j_end],
+                                P[i_start:i_end],
+                                Q[j_start:j_end],
+                                Pt[i_start:i_end],
+                                Qt[j_start:j_end],
+                                )
+            func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
 
             opt = self.optimizers()
             self.manual_backward(func_val)
             gnorm = self._gnorm()
             opt.zero_grad()
 
-        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.6e}, func_val: {:.6e}'.format(
+        msg = ('global_step: {}, epoch: {}, training_time: {:.3f}, gnorm: {:.3f}, func_val: {:.3f}'.format(
             self.global_step,
             self.current_epoch,
             self.tr_time,
@@ -321,10 +291,7 @@ class TwoTowerModel(pl.LightningModule):
 
     def _shared_eval_step(self, batch, batch_idx):
         P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-        if self.config.loss.startswith('Linear-LR'):
-            P, Unorm_sq, Q, Vnorm_sq = self.network(batch['us'], batch['vs'])
-        else:
-            P, Q = self.network(batch['us'], batch['vs'])
+        P, Q = self.network(batch['us'], batch['vs'])
         return {
                 'P': P.detach().cpu().numpy() if P is not None else None, 
                 'Q': Q.detach().cpu().numpy() if Q is not None else None,
@@ -343,9 +310,6 @@ class TwoTowerModel(pl.LightningModule):
         P, Q, Unorm_sq, Vnorm_sq = zip(*step_outputs)
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
-        if self.config.loss.startswith('Linear-LR') and self.config.isl2norm:
-            Unorm_sq = np.vstack([_data.reshape(-1, 1) for _data in Unorm_sq if _data is not None])
-            Vnorm_sq = np.vstack([_data.reshape(-1, 1) for _data in Vnorm_sq if _data is not None])
 
         m, n = P.shape[0], Q.shape[0]
         bsize_i = self.config.eval_bsize_i
@@ -358,13 +322,7 @@ class TwoTowerModel(pl.LightningModule):
             target = self.Y_eval[i_start:i_end].todense()
             for j in range(segment_n):
                 j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                if self.config.loss.startswith('Linear-LR'):
-                    score_mat[:, j_start:j_end] = np.add.outer(P[i_start:i_end].sum(axis=-1), Q[j_start:j_end].sum(axis=-1))
-                    if self.config.isl2norm:
-                        uv_norm = np.add.outer(Unorm_sq[i_start:i_end].sum(axis=-1), Vnorm_sq[j_start:j_end].sum(axis=-1)) ** 0.5
-                        score_mat[:, j_start:j_end] = score_mat[:, j_start:j_end] / uv_norm
-                else:
-                    score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
+                score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
             self.eval_metric.update(target, score_mat)
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
