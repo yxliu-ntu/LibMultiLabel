@@ -16,7 +16,19 @@ from .MNLoss import NonzeroDataset, CrossDataset, CrossRandomBatchSampler
 
 UNK = '<unk>'
 PAD = '**PAD**'
+MASK_MIN = -np.inf
 
+
+def gen_skip_mask(Y, skip_mask):
+    if skip_mask is None:
+        return None
+    skip_mask_file = open(skip_mask, 'r')
+    lines = skip_mask_file.readlines()
+    mask = []
+    for l in lines:
+        mask.append(int(l))
+    mask = np.array(mask)
+    return Y[mask]
 
 def svm_data_proc(x):
     x = [(int(i.split(':')[0]), float(i.split(':')[1])) for i in x.split()]

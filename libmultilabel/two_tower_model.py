@@ -17,7 +17,7 @@ from . import networks
 from . import MNLoss
 from .metrics import MultiLabelMetrics
 from .utils import dump_log, argsort_top_k, dense_to_sparse
-from .data_utils import spmtx2tensor
+from .data_utils import spmtx2tensor, gen_skip_mask, MASK_MIN
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import normalize
 
@@ -171,7 +171,6 @@ class TwoTowerModel(pl.LightningModule):
         _abs = batch['_abs']
         _bbs = batch['_bbs']
         loss = self.fmnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def _weighted_lrloss(self, logits, Y):
@@ -200,11 +199,12 @@ class TwoTowerModel(pl.LightningModule):
 
     def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
         with torch.enable_grad():
-            Utr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.U)
-            Vtr = spmtx2tensor(self.trainer.train_dataloader.dataset.datasets.V)
-            Atr = torch.Tensor(self.trainer.train_dataloader.dataset.datasets.A)
-            Btr = torch.Tensor(self.trainer.train_dataloader.dataset.datasets.B)
-            Ytr = self.trainer.train_dataloader.dataset.datasets.Yu
+            trainset = self.trainer.train_dataloader.dataset.datasets
+            Utr = spmtx2tensor(trainset.U)
+            Vtr = spmtx2tensor(trainset.V)
+            Atr = torch.Tensor(trainset.A)
+            Btr = torch.Tensor(trainset.B)
+            Ytr = trainset.Yu
             m, n = Utr.shape[0], Vtr.shape[0]
             segment_m = math.ceil(m/bsize_i)
             segment_n = math.ceil(n/bsize_j)
@@ -310,6 +310,7 @@ class TwoTowerModel(pl.LightningModule):
         P, Q, Unorm_sq, Vnorm_sq = zip(*step_outputs)
         P = np.vstack([_data for _data in P if _data is not None])
         Q = np.vstack([_data for _data in Q if _data is not None])
+        skip_mask = self.config['%s_skip_mask'%split]
 
         m, n = P.shape[0], Q.shape[0]
         bsize_i = self.config.eval_bsize_i
@@ -323,19 +324,19 @@ class TwoTowerModel(pl.LightningModule):
             for j in range(segment_n):
                 j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
                 score_mat[:, j_start:j_end] = P[i_start:i_end].dot(Q[j_start:j_end].T)
+            if skip_mask is not None:
+                score_mat[skip_mask[i_start:i_end].nonzero()] = MASK_MIN
             self.eval_metric.update(target, score_mat)
         metric_dict = self.eval_metric.get_metric_dict()
         self.log_dict(metric_dict)
-        dump_log(config=self.config, metrics=metric_dict, split=split)
+        #dump_log(config=self.config, metrics=metric_dict, split=split)
 
         if self.config.check_func_val and split == 'val':
             self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
-            print(f'====== {split} dataset evaluation result =======')
-            print(self.eval_metric)
-            print('')
-            logging.debug(f'{split} dataset evaluation result:\n{self.eval_metric}')
+            print(split, ','.join('%s:%.3f'%(_k, metric_dict[_k]) for _k in metric_dict))
+
         self.eval_metric.reset()
 
         return metric_dict

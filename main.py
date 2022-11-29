@@ -52,10 +52,14 @@ def get_config():
                         help='Path to validation data (default: [data_dir]/validL.csv)')
     parser.add_argument('--validR_path',
                         help='Path to validation data (default: [data_dir]/validR.csv)')
+    parser.add_argument('--val_skip_mask', type=str, default=None,
+                        help='Path to skip mask of validation data (default: [data_dir]/val_skip_mask.csv)')
     parser.add_argument('--testL_path',
                         help='Path to test data (default: [data_dir]/testL.csv)')
     parser.add_argument('--testR_path',
                         help='Path to test data (default: [data_dir]/testR.csv)')
+    parser.add_argument('--test_skip_mask', type=str, default=None,
+                        help='Path to skip_mask of test data (default: [data_dir]/test_skip_mask.csv)')
     #parser.add_argument('--val_size', type=float, default=0.2,
     #                    help='Training-validation split: a ratio in [0, 1] or an integer for the size of the validation set (default: %(default)s).')
     parser.add_argument('--shuffle', type=bool, default=True,
@@ -263,6 +267,8 @@ def main():
     config['N'] = train_loader.dataset.V.shape[0]
     config['Du'] = train_loader.dataset.U.shape[1]
     config['Dv'] = train_loader.dataset.V.shape[1]
+    config['val_skip_mask']  = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['val_skip_mask'])
+    config['test_skip_mask'] = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['test_skip_mask'])
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
     config['val_check_interval'] = 1 if len(train_loader) < 100 else 100 #math.ceil(len(train_loader)/100.)
