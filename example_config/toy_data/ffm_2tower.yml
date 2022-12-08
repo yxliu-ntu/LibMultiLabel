@@ -1,0 +1,25 @@
+# data
+data_name: toy_data
+data_dir: data/toy_data/
+trainL_path: data/toy_data/tr.lml.tr
+trainR_path: data/toy_data/label.lml
+validL_path: data/toy_data/tr.lml.va
+validR_path: data/toy_data/label.lml
+
+# train
+shuffle: True 
+patience: 100000000
+gradient_clip_val: 0.0
+gradient_clip_algorithm: norm
+
+# eval
+eval_bsize_i: 4096
+monitor_metrics: [P@1, R@1]
+val_metric: R@1
+
+# model
+model_name: FM2Tower
+drop_last: False
+dropout: 0.0
+k1: 4
+

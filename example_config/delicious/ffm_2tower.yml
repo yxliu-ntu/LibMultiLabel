@@ -1,0 +1,29 @@
+# data
+data_name: delicious
+data_dir: data/delicious/
+trainL_path: data/delicious/tr.lml.tr
+trainR_path: data/delicious/label.lml
+validL_path: data/delicious/tr.lml.va
+validR_path: data/delicious/label.lml
+val_skip_mask: data/delicious/tr.lml.tr_ids
+    #testL_path: data/delicious/te.lml
+    #testR_path: data/delicious/label.lml
+    #test_skip_mask: data/delicious/tr_ids
+
+# train
+shuffle: True 
+patience: 100000000
+gradient_clip_val: 0.0
+gradient_clip_algorithm: norm
+
+# eval
+eval_bsize_i: 4096
+monitor_metrics: [P@1, P@5, P@10, R@1, R@5, R@10]
+val_metric: R@5
+
+# model
+model_name: FM2Tower
+drop_last: False
+dropout: 0.0
+k1: 4
+

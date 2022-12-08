@@ -103,6 +103,10 @@ def get_config():
     parser.add_argument('--loss', type=str,
                         choices=[
                             #'Naive-LogSoftmax',
+                            'Cross-PAL',
+                            'Cross-OVR',
+                            'NonZero-PAL',
+                            'NonZero-OVR',
                             'Naive-LRLR',
                             'Naive-LRSQ',
                             'Minibatch-LRSQ',
@@ -226,7 +230,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename='best_model',
-            save_last=True,
+            save_last=False,#True,
             save_top_k=1,
             monitor=config.val_metric,
             mode='max' if config.val_metric != 'Aver-Rank' else 'min',
@@ -255,7 +259,7 @@ def main():
     valid_loader = dataloaders['valid']
     test_loader = dataloaders['test']
     assert valid_loader is not None
-    for loader in [train_loader, valid_loader, test_loader]:
+    for loader in [train_loader, valid_loader]:
         if loader == train_loader:
             loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U)
             loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V)
@@ -267,8 +271,6 @@ def main():
     config['N'] = train_loader.dataset.V.shape[0]
     config['Du'] = train_loader.dataset.U.shape[1]
     config['Dv'] = train_loader.dataset.V.shape[1]
-    config['val_skip_mask']  = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['val_skip_mask'])
-    config['test_skip_mask'] = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['test_skip_mask'])
     print('M: %d, N: %d, Du: %d, Dv: %d'%(config.M, config.N, config.Du, config.Dv))
 
     config['val_check_interval'] = 1 if len(train_loader) < 100 else 100 #math.ceil(len(train_loader)/100.)
@@ -293,6 +295,8 @@ def main():
     setup_loggers(os.path.join(checkpoint_dir, 'log'), config.silent)
     logging.info(f'Run name: {config.run_name}')
     logging.debug(f'Config as:\n{config}')
+    config['val_skip_mask']  = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['val_skip_mask'])
+    config['test_skip_mask'] = data_utils.gen_skip_mask(train_loader.dataset.Yu, config['test_skip_mask'])
     if config.eval:
         model = _Model.load_from_checkpoint(
                 config.checkpoint_path,
@@ -316,6 +320,8 @@ def main():
 
 
     if test_loader is not None:
+        test_loader.dataset.U = data_utils.obj_arr_to_csr(loader.dataset.U, train_loader.dataset.U.shape[1])
+        test_loader.dataset.V = data_utils.obj_arr_to_csr(loader.dataset.V, train_loader.dataset.V.shape[1])
         logging.info(f'Loading best model from `{checkpoint_callback.best_model_path}`...')
         model = _Model.load_from_checkpoint(
                 checkpoint_callback.best_model_path,

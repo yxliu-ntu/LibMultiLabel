@@ -104,8 +104,8 @@ class MultiLabelMetrics():
         macro_recall = labelwise_recall.mean()
 
         result = {
-                'Micro-Precision': micro_precision,
-                'Micro-Recall': micro_recall,
+                #'Micro-Precision': micro_precision,
+                #'Micro-Recall': micro_recall,
                 #'Micro-F1': f1(micro_precision, micro_recall),
                 #'Macro-F1': f1(labelwise_precision, labelwise_recall).mean(),
                 ## The f1 value of macro_precision and macro_recall. This variant of

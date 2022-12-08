@@ -21,6 +21,44 @@ from .data_utils import spmtx2tensor, gen_skip_mask, MASK_MIN
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import normalize
 
+class LogExpMNLoss(torch.nn.Module):
+    def __init__(self,
+            M: int,
+            N: int,
+            loss_type: str,
+            omega: int=1.0,
+            ):
+        super(LogExpMNLoss, self).__init__()
+        self.omega = omega
+        self.M = M
+        self.N = N
+        assert loss_type in ['OVR', 'PAL', 'nOVR', 'nPAL']
+        self.loss_type = loss_type
+
+    def _weighted_logsumexp(self, value, weight, dim):
+        assert dim in [0, 1, -1]
+        assert len(value.shape) == 2 and len(weight.shape) == 1
+        weight = weight.unsqueeze(1) if dim == 0 else weight.unsqueeze(0) # dim=1,-1 (1, n) or dim=0 (m, 1)
+        eps = 1e-20
+        _c, _ = torch.max(value, dim=dim, keepdim=True) # dim=1,-1 (m, 1) or dim=0 (1, n)
+        return _c.squeeze(dim) +\
+                torch.log(torch.sum(torch.exp(value - _c)*weight, dim=dim) + eps)
+
+    def forward(self, Y, A, B, Ab, Bb, P, Q):
+        coos = Y._indices()
+        Y_hat = P @ Q.T
+        Y_hat_pos = Y_hat[coos[0], coos[1]]
+
+        assert self.omega == 1.0, "Tuning omega is not supported yet."
+        if self.loss_type == 'OVR':
+            loss = - (Y_hat_pos.sum() + self.omega*torch.einsum('i,j,ij', A, B, F.logsigmoid(-Y_hat)))
+        elif self.loss_type == 'nOVR':
+            loss = - (Y_hat_pos.sum() + self.omega*torch.einsum('i,j,ij', A/Ab, B/Bb, F.logsigmoid(-Y_hat)))
+        elif self.loss_type == 'PAL':
+            loss = - (Y_hat_pos.sum() - self.omega*(A/Ab*self._weighted_logsumexp(Y_hat, B, dim=-1)).sum())
+        else:
+            loss = - (Y_hat_pos.sum() - self.omega*(A/Ab*self._weighted_logsumexp(Y_hat, B/Bb, dim=-1)).sum())
+        return loss
 
 class TwoTowerModel(pl.LightningModule):
     """Concrete class handling Pytorch Lightning training flow"""
@@ -41,27 +79,59 @@ class TwoTowerModel(pl.LightningModule):
         #self.tbwriter = SummaryWriter(os.path.join(config.tfboard_log_dir, config.run_name))
 
         # init loss
-        #if self.config.loss == 'Naive-LogSoftmax':
+        if self.config.loss == 'Cross-PAL':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = LogExpMNLoss(
+                    omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
+                    loss_type='PAL',
+                    )
+            self.step = self._trans_step
+        elif self.config.loss == 'NonZero-PAL':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = LogExpMNLoss(
+                    omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
+                    loss_type='nPAL',
+                    )
+            self.step = self._trans_step
+        elif self.config.loss == 'Cross-OVR':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = LogExpMNLoss(
+                    omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
+                    loss_type='OVR',
+                    )
+            self.step = self._trans_step
+        elif self.config.loss == 'NonZero-OVR':
+            logging.info(f'loss_type: {self.config.loss}')
+            self.mnloss = LogExpMNLoss(
+                    omega=self.config.omega,
+                    M=self.config.M,
+                    N=self.config.N,
+                    loss_type='nOVR',
+                    )
+            self.step = self._trans_step
+        #elif self.config.loss == 'Naive-LRLR':
         #    logging.info(f'loss_type: {self.config.loss}')
-        #    self.mnloss = torch.nn.CrossEntropyLoss(reduction='sum')
-        #    self.step = self._logsoftmax_step
-        if self.config.loss == 'Naive-LRLR':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
-                    )
-            self.step = self._naive_step
-        elif self.config.loss == 'Naive-LRSQ':
-            logging.info(f'loss_type: {self.config.loss}')
-            self.mnloss = MNLoss.NaiveMNLoss(
-                    omega=self.config.omega,
-                    M=self.config.M,
-                    N=self.config.N,
-                    )
-            self.step = self._naive_step
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            M=self.config.M,
+        #            N=self.config.N,
+        #            loss_func_minus=torch.nn.functional.binary_cross_entropy_with_logits,
+        #            )
+        #    self.step = self._naive_step
+        #elif self.config.loss == 'Naive-LRSQ':
+        #    logging.info(f'loss_type: {self.config.loss}')
+        #    self.mnloss = MNLoss.NaiveMNLoss(
+        #            omega=self.config.omega,
+        #            M=self.config.M,
+        #            N=self.config.N,
+        #            )
+        #    self.step = self._naive_step
         elif self.config.loss == 'Minibatch-LRSQ':
             logging.info(f'loss_type: {self.config.loss}')
             self.mnloss = MNLoss.MinibatchMNLoss(
@@ -107,7 +177,7 @@ class TwoTowerModel(pl.LightningModule):
                                    lr=self.config.learning_rate,
                                    initial_accumulator_value=0.1,
                                    eps=self.config.eps)
-            print('opt:%s'%optimizer_name, 'eps:%f'%self.config.eps)
+            #print('opt:%s'%optimizer_name, 'eps:%f'%self.config.eps)
         elif optimizer_name == 'adam':
             optimizer = optim.Adam(parameters,
                                    weight_decay=self.config.weight_decay,
@@ -139,14 +209,24 @@ class TwoTowerModel(pl.LightningModule):
         return wnorm_sq
 
     def _logsoftmax_step(self, batch, batch_idx):
-        raise NotImplementedError
-        #ps, qs = self.network(batch['us'], batch['vs'])
-        #amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
-        #ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
-        #logits = ps @ qs.T
-        #loss = amp*self.mnloss(logits, ys)
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #return loss
+        ps, qs = self.network(batch['us'], batch['vs'])
+        amp = self.config.M * self.config.N / ps.shape[0] / qs.shape[0]
+        ys = torch.arange(batch['ys'].shape[0], dtype=torch.long, device=ps.device)
+        logits = ps @ qs.T
+        loss = amp*self.mnloss(logits, ys)
+        return loss
+
+    def _trans_step(self, batch, batch_idx):
+        us, vs = batch['us'], batch['vs']
+        ys = batch['ys']
+        _as = batch['_as']
+        _bs = batch['_bs']
+        _abs = batch['_abs']
+        _bbs = batch['_bbs']
+
+        ps, qs = self.network(us, vs)
+        loss = self.mnloss(ys, _as, _bs, _abs, _bbs, ps, qs)
+        return loss
 
     def _naive_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
@@ -157,8 +237,7 @@ class TwoTowerModel(pl.LightningModule):
         ps, qs = self.network(batch['us'], batch['vs'])
         pts = ps.new_ones(ps.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         qts = qs.new_ones(qs.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=True) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        loss = self.mnloss(ys, _as, _bs, ps, qs, pts, qts, isscaling=batch_idx>0)
         return loss
 
     def _sogram_step(self, batch, batch_idx):
@@ -170,18 +249,8 @@ class TwoTowerModel(pl.LightningModule):
         _bs = batch['_bs']
         _abs = batch['_abs']
         _bbs = batch['_bbs']
-        loss = self.fmnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+        loss = self.fmnloss(ys, _as, _bs, _abs, _bbs, ps, qs, pts, qts)
         return loss
-
-    def _weighted_lrloss(self, logits, Y):
-        _lrloss = F.binary_cross_entropy_with_logits
-        coos = Y._indices()
-        logits_pos = logits[coos[0], coos[1]]
-        L_plus_part1 = _lrloss(logits_pos, (Y._values() > 0).to(logits_pos.dtype), reduction='none')
-        L_plus_part2 = _lrloss(logits_pos, logits_pos.new_zeros(logits_pos.size()), reduction='none')
-        L_plus = L_plus_part1 - self.config.omega * L_plus_part2
-        L_minus = _lrloss(logits, logits.new_zeros(logits.size()), reduction='none')
-        return L_plus.sum() + self.config.omega * L_minus.sum()
 
     def _minibatch_step(self, batch, batch_idx):
         us, vs = batch['us'], batch['vs']
@@ -192,57 +261,41 @@ class TwoTowerModel(pl.LightningModule):
         P, Q = self.network(us, vs)
         Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
         Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
-        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt) + 0.5 * self.config.l2_lambda * self._wnorm_sq()
-        #logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
-        #print(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        loss = self.mnloss(Y, A, B, P, Q, Pt, Qt)
         return loss
 
     def _calc_func_val(self, bsize_i=4096, bsize_j=65536):
         with torch.enable_grad():
             trainset = self.trainer.train_dataloader.dataset.datasets
-            Utr = spmtx2tensor(trainset.U)
-            Vtr = spmtx2tensor(trainset.V)
             Atr = torch.Tensor(trainset.A)
             Btr = torch.Tensor(trainset.B)
+            Abtr = torch.Tensor(trainset.Ab)
+            Bbtr = torch.Tensor(trainset.Bb)
             Ytr = trainset.Yu
-            m, n = Utr.shape[0], Vtr.shape[0]
+            m, n = Ytr.shape
             segment_m = math.ceil(m/bsize_i)
             segment_n = math.ceil(n/bsize_j)
-
-            P, Unorm_sq, Q, Vnorm_sq = None, None, None, None
-            P, Q = self.network(Utr, Vtr)
-            Pt = P.new_ones(P.size()[0], self.config.k1) * np.sqrt(1./self.config.k1) * self.config.imp_r
-            Qt = Q.new_ones(Q.size()[0], self.config.k1) * np.sqrt(1./self.config.k1)
 
             func_val = torch.tensor(0.)
             for i in range(segment_m):
                 i_start, i_end = i*bsize_i, min((i+1)*bsize_i, m)
-                logits = torch.zeros(i_end-i_start, n)
-                target = spmtx2tensor(Ytr[i_start:i_end])
+                Utr = spmtx2tensor(trainset.U[i_start:i_end])
                 for j in range(segment_n):
                     j_start, j_end = j*bsize_j, min((j+1)*bsize_j, n)
-                    if self.config.loss.startswith('Naive'):
-                        func_val = func_val + self.mnloss(
-                                target,
-                                Atr[i_start:i_end],
-                                Btr[j_start:j_end],
-                                P[i_start:i_end],
-                                Q[j_start:j_end],
-                                Pt[i_start:i_end],
-                                Qt[j_start:j_end],
-                                isscaling=False,
-                                )
-                    else:
-                        func_val = func_val + self.mnloss(
-                                target,
-                                Atr[i_start:i_end],
-                                Btr[j_start:j_end],
-                                P[i_start:i_end],
-                                Q[j_start:j_end],
-                                Pt[i_start:i_end],
-                                Qt[j_start:j_end],
-                                )
-            func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
+                    Vtr = spmtx2tensor(trainset.V[j_start:j_end])
+                    target = spmtx2tensor(Ytr[i_start:i_end, j_start:j_end])
+                    _batch = {
+                            'ys': target,
+                            'us': Utr,
+                            'vs': Vtr,
+                            '_as':Atr[i_start:i_end],
+                            '_bs':Btr[j_start:j_end],
+                            '_abs':Abtr[i_start:i_end],
+                            '_bbs':Bbtr[j_start:j_end],
+                            }
+                    func_val = func_val + self.step(_batch, -1)
+            if self.config.l2_lambda > 0.:
+                func_val = func_val + 0.5 * self.config.l2_lambda * self._wnorm_sq()
 
             opt = self.optimizers()
             self.manual_backward(func_val)
@@ -265,10 +318,12 @@ class TwoTowerModel(pl.LightningModule):
         opt.zero_grad()
         start_time = time.time()
         loss = self.step(batch, batch_idx)
+        if self.config.l2_lambda > 0.:
+            loss += 0.5 * self.config.l2_lambda * self._wnorm_sq()
         self.manual_backward(loss)
         opt.step()
         self.tr_time += time.time() - start_time
-        logging.debug(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
+        logging.warning(f'epoch: {self.current_epoch}, batch: {batch_idx}, loss: {loss.item()}')
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -331,11 +386,11 @@ class TwoTowerModel(pl.LightningModule):
         self.log_dict(metric_dict)
         #dump_log(config=self.config, metrics=metric_dict, split=split)
 
-        if self.config.check_func_val and split == 'val':
+        if self.config.check_func_val and split == 'val' and self.config.bratio < 1.:
             self._calc_func_val()
 
         if not self.config.silent and (not self.trainer or self.trainer.is_global_zero):
-            print(split, ','.join('%s:%.3f'%(_k, metric_dict[_k]) for _k in metric_dict))
+            logging.warning(split + ' ' +','.join('%s:%.3f'%(_k, metric_dict[_k]*100) for _k in metric_dict))
 
         self.eval_metric.reset()
 

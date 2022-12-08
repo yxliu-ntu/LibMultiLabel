@@ -1,23 +1,25 @@
 # data
-data_name: ml-10M100K
-data_dir: data/ml-10M100K/mf_format/
-trainL_path: data/ml-10M100K/mf_format/tr #.small
-trainR_path: data/ml-10M100K/mf_format/item
-validL_path: data/ml-10M100K/mf_format/va
-validR_path: data/ml-10M100K/mf_format/item
-testL_path: data/ml-10M100K/mf_format/te
-testR_path: data/ml-10M100K/mf_format/item
+data_name: ml10m
+data_dir: data/ml10m/
+trainL_path: data/ml10m/tr.lml.tr
+trainR_path: data/ml10m/label.lml
+validL_path: data/ml10m/tr.lml.va
+validR_path: data/ml10m/label.lml
+val_skip_mask: data/ml10m/tr.lml.tr_ids
+    #testL_path: data/ml10m/te.lml
+    #testR_path: data/ml10m/label.lml
+    #test_skip_mask: data/ml10m/tr_ids
 
 # train
 shuffle: True 
-patience: 10
+patience: 100000000
 gradient_clip_val: 0.0
 gradient_clip_algorithm: norm
 
 # eval
 eval_bsize_i: 4096
-monitor_metrics: [P@1, P@5, P@10, P@20, P@40, R@1, R@5, R@10, R@20, R@40]
-val_metric: R@40
+monitor_metrics: [P@1, P@5, P@10, R@1, R@5, R@10]
+val_metric: R@5
 
 # model
 model_name: FM2Tower
