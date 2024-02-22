@@ -69,11 +69,11 @@ class MultiLabelMetrics():
             y_true (ndarray): an array with ground truth labels (shape: batch_size * number of classes)
             y_pred (ndarray): an array with predicted label values (shape: batch_size * number of classes)
         """
-        y_pred_pos = expit(y_pred) > self.metric_threshold
 
         n_eval = len(y_true)
         self.n_eval += n_eval
-        self.multilabel_confusion_matrix += multilabel_confusion_matrix(y_true, y_pred_pos)
+        #y_pred_pos = expit(y_pred) > self.metric_threshold
+        #self.multilabel_confusion_matrix += multilabel_confusion_matrix(y_true, y_pred_pos)
 
         # Add metrics like P@k, R@k to the result dict. Multiply n_eval for
         # cumulation.
@@ -90,22 +90,22 @@ class MultiLabelMetrics():
         """Get evaluation results."""
 
         self.ranks = np.array(self.ranks)
-        cm = self.multilabel_confusion_matrix
-        cm_sum = cm.sum(axis=0)
-        tp_sum, fp_sum, fn_sum = cm_sum[1,1], cm_sum[0,1], cm_sum[1,0]
-        micro_precision = tp_sum / (tp_sum + fp_sum + 1e-10)
-        micro_recall = tp_sum / (tp_sum + fn_sum + 1e-10)
+        #cm = self.multilabel_confusion_matrix
+        #cm_sum = cm.sum(axis=0)
+        #tp_sum, fp_sum, fn_sum = cm_sum[1,1], cm_sum[0,1], cm_sum[1,0]
+        #micro_precision = tp_sum / (tp_sum + fp_sum + 1e-10)
+        #micro_recall = tp_sum / (tp_sum + fn_sum + 1e-10)
 
-        # Use lablewise tp, fp, fn to calculate Macro results
-        tp, fp, fn = cm[:,1,1], cm[:,0,1], cm[:,1,0]
-        labelwise_precision = tp / (tp + fp + 1e-10)
-        labelwise_recall = tp / (tp + fn + 1e-10)
-        macro_precision = labelwise_precision.mean()
-        macro_recall = labelwise_recall.mean()
+        ## Use lablewise tp, fp, fn to calculate Macro results
+        #tp, fp, fn = cm[:,1,1], cm[:,0,1], cm[:,1,0]
+        #labelwise_precision = tp / (tp + fp + 1e-10)
+        #labelwise_recall = tp / (tp + fn + 1e-10)
+        #macro_precision = labelwise_precision.mean()
+        #macro_recall = labelwise_recall.mean()
 
         result = {
-                'Micro-Precision': micro_precision,
-                'Micro-Recall': micro_recall,
+                #'Micro-Precision': micro_precision,
+                #'Micro-Recall': micro_recall,
                 #'Micro-F1': f1(micro_precision, micro_recall),
                 #'Macro-F1': f1(labelwise_precision, labelwise_recall).mean(),
                 ## The f1 value of macro_precision and macro_recall. This variant of
